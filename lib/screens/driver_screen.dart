@@ -1,204 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/sync_service.dart';
 
+// ==========================================
+// 1. LAYAR UTAMA DRIVER (DAFTAR TUGAS INDUK)
+// ==========================================
 class DriverScreen extends StatelessWidget {
   const DriverScreen({super.key, required this.onToggleDashboard});
-
   final VoidCallback onToggleDashboard;
-
-  Future<void> _kelolaTugas(
-    BuildContext context,
-    Map<String, dynamic> tugas,
-  ) async {
-    final items = SyncService.instance.daftarItem.value
-        .where((e) => e['id_tugas'] == tugas['id'])
-        .toList();
-    final qtyCtrls = <String, TextEditingController>{};
-    for (final item in items) {
-      qtyCtrls[item['id'] as String] = TextEditingController(
-        text: (item['qty_drop_real'] ?? '').toString(),
-      );
-    }
-
-    String metode = (tugas['metode_pembayaran'] as String?) ?? 'transfer';
-    final tunaiCtrl = TextEditingController(
-      text: (tugas['jumlah_pembayaran_tunai'] ?? '').toString(),
-    );
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModal) => Padding(
-            padding: EdgeInsets.only(
-              left: 24,
-              right: 24,
-              top: 12,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Bottom sheet drag handle indicator
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    tugas['nama_tugas'] ?? '-',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 22,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.business, size: 18, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Klien: ${tugas['nama_klien'] ?? '-'}',
-                        style: TextStyle(
-                          color: Colors.grey.shade700,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  if (tugas['status_tugas'] == 'pending')
-                    FilledButton.icon(
-                      onPressed: () async {
-                        await SyncService.instance.mutateData(
-                          'tugas',
-                          'update',
-                          {'id': tugas['tugas_id'], 'status': 'in_progress'},
-                        );
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('Mulai Tugas'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.all(16),
-                      ),
-                    )
-                  else ...[
-                    const Text(
-                      'Progress Pengiriman',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 12),
-                    ...items.map(
-                      (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: TextField(
-                          controller: qtyCtrls[item['id']],
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText:
-                                '${item['nama_barang']} (Dipesan: ${item['qty_pesanan']})',
-                            helperText: 'Jumlah drop aktual',
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: metode,
-                      decoration: const InputDecoration(
-                        labelText: 'Metode Pembayaran',
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'transfer',
-                          child: Text('Transfer Bank'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'cash',
-                          child: Text('Tunai (Cash)'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'tempo',
-                          child: Text('Jatuh Tempo'),
-                        ),
-                      ],
-                      onChanged: (value) =>
-                          setModal(() => metode = value ?? 'transfer'),
-                    ),
-                    if (metode == 'cash') ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tunaiCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Jumlah Pembayaran Tunai',
-                          prefixText: 'Rp ',
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: () async {
-                        for (final item in items) {
-                          final qty = int.tryParse(qtyCtrls[item['id']]!.text);
-                          await SyncService.instance.mutateData(
-                            'item_pesanan',
-                            'update',
-                            {...item, 'qty_drop_real': qty},
-                          );
-                        }
-
-                        await SyncService.instance
-                            .mutateData('tugas_kunjungan', 'update', {
-                              'id': tugas['id'],
-                              'tugas_id': tugas['tugas_id'],
-                              'status': 'delivered',
-                              'metode_bayar': metode,
-                              'total_dibayar': metode == 'cash'
-                                  ? double.tryParse(tunaiCtrl.text) ?? 0
-                                  : 0,
-                            });
-                        await SyncService.instance.mutateData(
-                          'tugas',
-                          'update',
-                          {'id': tugas['tugas_id'], 'status': 'completed'},
-                        );
-
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.all(16),
-                      ),
-                      child: const Text(
-                        'Selesaikan Tugas',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -208,48 +17,9 @@ class DriverScreen extends StatelessWidget {
           'Driver Dashboard',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.blueGrey.shade800, // Distinct color for driver
+        backgroundColor: Colors.blueGrey.shade800,
         foregroundColor: Colors.white,
         actions: [
-          Tooltip(
-            message: 'Sinkronisasi Data',
-            child: IconButton(
-              icon: const Icon(Icons.sync),
-              onPressed: () async {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Menyinkronkan data ke server...'),
-                  ),
-                );
-                try {
-                  // Call your sync method here
-                  // await SyncService.instance.sync();
-
-                  await Future.delayed(
-                    const Duration(seconds: 1),
-                  ); // Placeholder delay
-
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Sinkronisasi selesai!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Gagal sinkron: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-            ),
-          ),
           Tooltip(
             message: 'Switch to Admin App',
             child: IconButton(
@@ -261,11 +31,14 @@ class DriverScreen extends StatelessWidget {
         ],
       ),
       body: Container(
-        color: Colors.grey.shade100, // Light background to make cards pop
+        color: Colors.grey.shade100,
         child: ValueListenableBuilder<List<Map<String, dynamic>>>(
           valueListenable: SyncService.instance.daftarTugas,
-          builder: (context, tugas, _) {
-            if (tugas.isEmpty) {
+          builder: (context, tugasList, _) {
+            // Karena ini aplikasi Driver, kita filter tugas yang ditugaskan ke driver ini saja
+            // (Abaikan jika Anda belum mengimplementasikan Auth driver)
+
+            if (tugasList.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -289,17 +62,37 @@ class DriverScreen extends StatelessWidget {
             }
             return ListView.separated(
               padding: const EdgeInsets.all(16),
-              itemCount: tugas.length,
+              itemCount: tugasList.length,
               separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
-                final item = tugas[index];
-                final isCompleted = item['status_tugas'] == 'completed';
+                final tugas = tugasList[index];
+                final status = (tugas['status'] ?? 'pending').toString();
+                final isCompleted = status == 'completed';
+
+                // Hitung jumlah tujuan untuk UI
+                final jumlahTujuan = SyncService
+                    .instance
+                    .daftarTugasKunjungan
+                    .value
+                    .where((k) => k['tugas_id'] == tugas['id'])
+                    .length;
 
                 return Card(
                   margin: EdgeInsets.zero,
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
-                    onTap: () => _kelolaTugas(context, item),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DriverTugasDetailScreen(tugas: tugas),
+                        ),
+                      );
+                    },
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Row(
@@ -322,7 +115,7 @@ class DriverScreen extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  item['nama_tugas'] ?? '-',
+                                  tugas['nama_tugas'] ?? '-',
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
@@ -330,7 +123,7 @@ class DriverScreen extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Klien: ${item['nama_klien'] ?? '-'}',
+                                  '$jumlahTujuan Tujuan Pengiriman',
                                   style: TextStyle(color: Colors.grey.shade700),
                                 ),
                               ],
@@ -346,6 +139,537 @@ class DriverScreen extends StatelessWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 2. LAYAR DETAIL TUGAS (REORDER & EKSEKUSI)
+// ==========================================
+class DriverTugasDetailScreen extends StatefulWidget {
+  final Map<String, dynamic> tugas;
+  const DriverTugasDetailScreen({super.key, required this.tugas});
+
+  @override
+  State<DriverTugasDetailScreen> createState() =>
+      _DriverTugasDetailScreenState();
+}
+
+class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
+  List<Map<String, dynamic>> _kunjunganList = [];
+  bool _isPending = true;
+  bool _isLoading = false; // State baru untuk efek loading transisi
+
+  // Controllers untuk input form aktif
+  final Map<String, TextEditingController> _qtyCtrls = {};
+  final TextEditingController _tunaiCtrl = TextEditingController();
+  String _metode = 'transfer';
+  String? _activeKunjunganId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  void _loadData() {
+    final statusTugas = (widget.tugas['status'] ?? 'pending').toString();
+    _isPending = statusTugas == 'pending';
+
+    final raw = SyncService.instance.daftarTugasKunjungan.value
+        .where((k) => k['tugas_id'] == widget.tugas['id'])
+        .toList();
+
+    // Sort berdasarkan urutan yang tersimpan di database
+    raw.sort((a, b) => (a['urutan'] ?? 0).compareTo(b['urutan'] ?? 0));
+    _kunjunganList = List.from(raw);
+
+    _refreshActiveForm();
+  }
+
+  void _refreshActiveForm() {
+    if (_isPending) return;
+
+    final active = _kunjunganList.firstWhere(
+      (k) => (k['status_kunjungan'] ?? k['status']) == 'pending',
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (active.isNotEmpty && _activeKunjunganId != active['id']) {
+      _activeKunjunganId = active['id'];
+      _qtyCtrls.clear();
+      _tunaiCtrl.clear();
+      _metode = 'transfer';
+
+      final items = SyncService.instance.daftarTugasItem.value
+          .where((e) => e['kunjungan_id'] == active['id'])
+          .toList();
+      for (final item in items) {
+        _qtyCtrls[item['id']] = TextEditingController(
+          text: (item['qty_diminta'] ?? '').toString(),
+        );
+      }
+    }
+  }
+
+  Future<void> _mulaiTugas() async {
+    // 1. Munculkan Layar Putih (Animasi Fade In)
+    setState(() {
+      _isLoading = true;
+    });
+
+    // 2. Simpan Urutan ke Database
+    for (int i = 0; i < _kunjunganList.length; i++) {
+      await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
+        'id': _kunjunganList[i]['id'],
+        'urutan': i,
+      });
+    }
+
+    // 3. Ubah Status Tugas Utama di Database
+    await SyncService.instance.mutateData('tugas', 'update', {
+      'id': widget.tugas['id'],
+      'status': 'in_progress',
+    });
+
+    // PENTING: Update status lokal agar UI membaca status yang baru
+    widget.tugas['status'] = 'in_progress';
+
+    // (Opsional) Tambahkan sedikit delay agar animasi loading terasa lebih natural
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    if (!mounted) return;
+
+    // 4. Hilangkan Layar Putih dan pindah ke mode Tugas Berjalan
+    setState(() {
+      _isPending = false;
+      _isLoading = false;
+      _loadData();
+    });
+  }
+
+  Future<void> _selesaikanKunjunganSaatIni(
+    Map<String, dynamic> activeKunjungan,
+    List<Map<String, dynamic>> items,
+  ) async {
+    final Map<String, int> qtyPerBarang = {};
+    for (final item in items) {
+      final qty = int.tryParse(_qtyCtrls[item['id']]!.text) ?? 0;
+      final barangId = item['barang_id'];
+      if (barangId != null)
+        qtyPerBarang[barangId] = (qtyPerBarang[barangId] ?? 0) + qty;
+
+      await SyncService.instance.mutateData('tugas_item', 'update', {
+        'id': item['id'],
+        'qty_dikirim': qty,
+      });
+    }
+
+    // Deduct Muatan Kendaraan
+    final muatan = SyncService.instance.daftarMuatanTugas.value.where(
+      (m) => m['tugas_id'] == widget.tugas['id'],
+    );
+    for (final m in muatan) {
+      final barangId = m['barang_id'];
+      if (barangId == null) continue;
+      final berkurang = qtyPerBarang[barangId] ?? 0;
+      final current = int.tryParse('${m['qty_sisa'] ?? 0}') ?? 0;
+      final sisaBaru = (current - berkurang).clamp(0, 1 << 31);
+
+      await SyncService.instance.mutateData('muatan_tugas', 'update', {
+        'id': m['id'],
+        'qty_sisa': sisaBaru,
+      });
+    }
+
+    // Update Status Kunjungan
+    await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
+      'id': activeKunjungan['id'],
+      'status': 'delivered',
+      'metode_bayar': _metode,
+      'total_dibayar': _metode == 'cash'
+          ? (double.tryParse(_tunaiCtrl.text) ?? 0)
+          : 0,
+    });
+
+    await _cekStatusTugasSelesai();
+  }
+
+  Future<void> _tandaiGagal(Map<String, dynamic> activeKunjungan) async {
+    await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
+      'id': activeKunjungan['id'],
+      'status': 'failed',
+    });
+    await _cekStatusTugasSelesai();
+  }
+
+  Future<void> _cekStatusTugasSelesai() async {
+    final raw = SyncService.instance.daftarTugasKunjungan.value
+        .where((k) => k['tugas_id'] == widget.tugas['id'])
+        .toList();
+    final semuaSelesai = raw.every(
+      (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
+    );
+
+    if (semuaSelesai) {
+      await SyncService.instance.mutateData('tugas', 'update', {
+        'id': widget.tugas['id'],
+        'status': 'completed',
+      });
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tugas Selesai! Kembali ke markas.')),
+        );
+      }
+    } else {
+      if (!mounted) return;
+      setState(() => _loadData());
+    }
+  }
+
+  Future<void> _bukaMaps(String alamat) async {
+    // URL standar resmi Google Maps untuk pencarian lokasi
+    final urlString =
+        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(alamat)}';
+    final uri = Uri.parse(urlString);
+
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tidak dapat membuka Google Maps.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Terjadi kesalahan: $e')));
+      }
+    }
+  }
+
+  // --- UI BUILDERS ---
+
+  Widget _buildPendingReorderView() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.blue.shade50,
+          child: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tahan dan geser (drag) baris ke atas/bawah untuk menyusun rute terbaik Anda sebelum berangkat.',
+                  style: TextStyle(color: Colors.blue),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ReorderableListView.builder(
+            itemCount: _kunjunganList.length,
+            onReorder: (oldIndex, newIndex) {
+              setState(() {
+                if (newIndex > oldIndex) newIndex -= 1;
+                final item = _kunjunganList.removeAt(oldIndex);
+                _kunjunganList.insert(newIndex, item);
+              });
+            },
+            itemBuilder: (context, index) {
+              final k = _kunjunganList[index];
+              return Card(
+                key: ValueKey(k['id']),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blueGrey,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  title: Text(
+                    k['nama_klien'] ?? '-',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  trailing: const Icon(Icons.drag_handle),
+                ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: FilledButton.icon(
+            onPressed: _mulaiTugas,
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('Kunci Rute & Mulai Tugas'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+              backgroundColor: Colors.orange,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveKunjunganView() {
+    final active = _kunjunganList.firstWhere(
+      (k) => (k['status_kunjungan'] ?? k['status']) == 'pending',
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (active.isEmpty) return const Center(child: Text('Memuat...'));
+
+    final klien = SyncService.instance.daftarKlien.value.firstWhere(
+      (k) => k['id'] == active['klien_id'],
+      orElse: () => {},
+    );
+    final alamat = klien['alamat']?.toString() ?? 'Alamat tidak tersedia';
+
+    final urutanTujuan = _kunjunganList.indexOf(active) + 1;
+
+    final items = SyncService.instance.daftarTugasItem.value
+        .where((e) => e['kunjungan_id'] == active['id'])
+        .toList();
+    final barangById = {
+      for (final b in SyncService.instance.daftarBarang.value) b['id']: b,
+    };
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. KARTU VISUAL ALAMAT
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: Colors.blue.shade200, width: 2),
+            ),
+            color: Colors.blue.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade600,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Tujuan $urutanTujuan dari ${_kunjunganList.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    active['nama_klien'] ?? '-',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        color: Colors.red.shade400,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          alamat,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Colors.blueGrey.shade700,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: () => _bukaMaps(alamat),
+                    icon: const Icon(Icons.map),
+                    label: const Text('Buka Rute di Maps'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: Colors.blue.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+          const Text(
+            'Input Drop Pengiriman',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+          const SizedBox(height: 16),
+
+          // 2. FORM ITEM & PAYMENT
+          ...items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: TextField(
+                controller: _qtyCtrls[item['id']],
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText:
+                      '${barangById[item['barang_id']]?['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']})',
+                  prefixIcon: const Icon(Icons.inventory_2_outlined),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _metode,
+            decoration: const InputDecoration(
+              labelText: 'Metode Pembayaran',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.payment),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'transfer', child: Text('Transfer Bank')),
+              DropdownMenuItem(value: 'cash', child: Text('Tunai (Cash)')),
+              DropdownMenuItem(value: 'tempo', child: Text('Jatuh Tempo')),
+            ],
+            onChanged: (val) => setState(() => _metode = val ?? 'transfer'),
+          ),
+          if (_metode == 'cash') ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _tunaiCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Diterima Tunai',
+                prefixText: 'Rp ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _tandaiGagal(active),
+                  icon: const Icon(Icons.cancel, color: Colors.red),
+                  label: const Text(
+                    'Gagal',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed: () => _selesaikanKunjunganSaatIni(active, items),
+                  icon: const Icon(Icons.check_circle),
+                  label: const Text('Selesai Drop'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.green,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isPending ? 'Susun Rute Anda' : 'Tugas Berjalan'),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 1,
+      ),
+      body: Stack(
+        children: [
+          // 1. Konten Utama (Akan berganti otomatis ketika _isPending berubah)
+          Positioned.fill(
+            child: _isPending
+                ? _buildPendingReorderView()
+                : _buildActiveKunjunganView(),
+          ),
+
+          // 2. Animasi Layar Loading Putih Transisi
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring:
+                  !_isLoading, // Cegah klik/interaksi kalau tidak sedang loading
+              child: AnimatedOpacity(
+                opacity: _isLoading ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 350), // Durasi fade
+                child: Container(
+                  color: Colors.white,
+                  child: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 24),
+                        Text(
+                          'Menyimpan rute & Memulai tugas...',
+                          style: TextStyle(
+                            color: Colors.blueGrey,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

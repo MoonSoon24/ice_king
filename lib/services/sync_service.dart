@@ -19,6 +19,12 @@ class SyncService {
   final ValueNotifier<List<Map<String, dynamic>>> daftarItem = ValueNotifier(
     [],
   );
+  final ValueNotifier<List<Map<String, dynamic>>> daftarTugasItem =
+      ValueNotifier([]);
+  final ValueNotifier<List<Map<String, dynamic>>> daftarTugasKunjungan =
+      ValueNotifier([]);
+  final ValueNotifier<List<Map<String, dynamic>>> daftarMuatanTugas =
+      ValueNotifier([]);
   final ValueNotifier<List<Map<String, dynamic>>> daftarKaryawan =
       ValueNotifier([]);
   final ValueNotifier<List<Map<String, dynamic>>> daftarBarang = ValueNotifier(
@@ -57,8 +63,16 @@ class SyncService {
   String generateId() => _uuid.v4();
 
   void _loadCache() {
-    daftarTugas.value = _decodeList(_prefs.getString('cache_tugas_kunjungan'));
+    daftarTugas.value = _decodeList(_prefs.getString('cache_tugas'));
+    daftarTugasKunjungan.value = _decodeList(
+      _prefs.getString('cache_tugas_kunjungan'),
+    );
+
     daftarItem.value = _decodeList(_prefs.getString('cache_item_pesanan'));
+    daftarTugasItem.value = _decodeList(_prefs.getString('cache_tugas_item'));
+    daftarMuatanTugas.value = _decodeList(
+      _prefs.getString('cache_muatan_tugas'),
+    );
     daftarKaryawan.value = _decodeList(_prefs.getString('cache_karyawan'));
     daftarBarang.value = _decodeList(_prefs.getString('cache_barang'));
     daftarKlien.value = _decodeList(_prefs.getString('cache_klien'));
@@ -76,8 +90,13 @@ class SyncService {
             .from('tugas_kunjungan')
             .select()
             .order('created_at', ascending: false),
-        SupabaseConfig.client.from('tugas').select(),
+        SupabaseConfig.client
+            .from('tugas')
+            .select()
+            .order('created_at', ascending: false),
         SupabaseConfig.client.from('item_pesanan').select(),
+        SupabaseConfig.client.from('tugas_item').select(),
+        SupabaseConfig.client.from('muatan_tugas').select(),
         SupabaseConfig.client.from('karyawan').select(),
         SupabaseConfig.client.from('barang').select(),
         SupabaseConfig.client.from('klien').select(),
@@ -86,44 +105,53 @@ class SyncService {
       final kunjungan = List<Map<String, dynamic>>.from(hasil[0] as List);
       final tugas = List<Map<String, dynamic>>.from(hasil[1] as List);
       final itemPesanan = List<Map<String, dynamic>>.from(hasil[2] as List);
-      final karyawan = List<Map<String, dynamic>>.from(hasil[3] as List);
-      final barang = List<Map<String, dynamic>>.from(hasil[4] as List);
-      final klien = List<Map<String, dynamic>>.from(hasil[5] as List);
+      final tugasItem = List<Map<String, dynamic>>.from(hasil[3] as List);
+      final muatanTugas = List<Map<String, dynamic>>.from(hasil[4] as List);
+      final karyawan = List<Map<String, dynamic>>.from(hasil[5] as List);
+      final barang = List<Map<String, dynamic>>.from(hasil[6] as List);
+      final klien = List<Map<String, dynamic>>.from(hasil[7] as List);
 
-      final tugasById = {for (final t in tugas) t['id']: t};
       final karyawanById = {for (final k in karyawan) k['id']: k};
       final klienById = {for (final k in klien) k['id']: k};
 
-      daftarTugas.value = kunjungan.map((k) {
-        final tugasRow = tugasById[k['tugas_id']];
-        final driverId = tugasRow?['karyawan_id'];
+      // PERBAIKAN: Isi daftarTugas KHUSUS untuk tabel tugas (Parent)
+      daftarTugas.value = tugas.map((t) {
+        final driverId = t['karyawan_id'];
         final driver = driverId != null ? karyawanById[driverId] : null;
-        return {
-          ...k,
-          'nama_tugas': tugasRow?['nama_tugas'] ?? '-',
-          'tanggal_tugas':
-              tugasRow?['tanggal']?.toString() ?? k['created_at']?.toString(),
-          'status_tugas': tugasRow?['status'] ?? 'pending',
-          'id_driver': driverId,
-          'nama_driver': driver?['nama'],
-          'nama_klien': klienById[k['klien_id']]?['nama'],
-          'metode_pembayaran': k['metode_bayar'],
-          'jumlah_pembayaran_tunai': k['total_dibayar'],
-        };
+        return {...t, 'nama_driver': driver?['nama'] ?? 'Unknown Driver'};
+      }).toList();
+
+      // PERBAIKAN: Isi daftarTugasKunjungan KHUSUS untuk tabel kunjungan (Children/Rute)
+      daftarTugasKunjungan.value = kunjungan.map((k) {
+        final klienData = klienById[k['klien_id']];
+        return {...k, 'nama_klien': klienData?['nama'] ?? 'Unknown Klien'};
       }).toList();
 
       daftarItem.value = itemPesanan;
+      daftarTugasItem.value = tugasItem;
+      daftarMuatanTugas.value = muatanTugas;
       daftarKaryawan.value = karyawan;
       daftarBarang.value = barang;
       daftarKlien.value = klien;
 
+      // PERBAIKAN: Simpan cache secara terpisah
+      await _prefs.setString('cache_tugas', jsonEncode(daftarTugas.value));
       await _prefs.setString(
         'cache_tugas_kunjungan',
-        jsonEncode(daftarTugas.value),
+        jsonEncode(daftarTugasKunjungan.value),
       );
+
       await _prefs.setString(
         'cache_item_pesanan',
         jsonEncode(daftarItem.value),
+      );
+      await _prefs.setString(
+        'cache_tugas_item',
+        jsonEncode(daftarTugasItem.value),
+      );
+      await _prefs.setString(
+        'cache_muatan_tugas',
+        jsonEncode(daftarMuatanTugas.value),
       );
       await _prefs.setString(
         'cache_karyawan',
@@ -136,35 +164,19 @@ class SyncService {
     }
   }
 
-  // FIXED: Moved this outside mutateData
   void _mutateLokal(String tabel, String aksi, Map<String, dynamic> data) {
-    if (tabel == 'tugas') {
-      final listBaru = List<Map<String, dynamic>>.from(daftarTugas.value);
-      if (aksi == 'delete') {
-        listBaru.removeWhere((e) => e['tugas_id'] == data['id']);
-      } else {
-        final index = listBaru.indexWhere((e) => e['tugas_id'] == data['id']);
-        if (index != -1) {
-          listBaru[index] = {
-            ...listBaru[index],
-            'status_tugas': data['status'] ?? listBaru[index]['status_tugas'],
-            'nama_tugas': data['nama_tugas'] ?? listBaru[index]['nama_tugas'],
-            'tanggal_tugas':
-                data['tanggal']?.toString() ?? listBaru[index]['tanggal_tugas'],
-            'id_driver': data['karyawan_id'] ?? listBaru[index]['id_driver'],
-          };
-        }
-      }
-      daftarTugas.value = listBaru;
-      _prefs.setString('cache_tugas_kunjungan', jsonEncode(listBaru));
-      return;
-    }
-
     ValueNotifier<List<Map<String, dynamic>>>? notifier;
-    if (tabel == 'tugas_kunjungan') {
+
+    if (tabel == 'tugas') {
       notifier = daftarTugas;
+    } else if (tabel == 'tugas_kunjungan') {
+      notifier = daftarTugasKunjungan; // PERBAIKAN: Sekarang arahnya benar
     } else if (tabel == 'item_pesanan') {
       notifier = daftarItem;
+    } else if (tabel == 'tugas_item') {
+      notifier = daftarTugasItem;
+    } else if (tabel == 'muatan_tugas') {
+      notifier = daftarMuatanTugas;
     } else if (tabel == 'karyawan') {
       notifier = daftarKaryawan;
     } else if (tabel == 'barang') {
@@ -172,57 +184,27 @@ class SyncService {
     } else if (tabel == 'klien') {
       notifier = daftarKlien;
     }
+
     if (notifier == null) return;
 
     final listBaru = List<Map<String, dynamic>>.from(notifier.value);
+
+    // PERBAIKAN: Logika mutasi di-sederhanakan karena data sudah dipisah
     if (aksi == 'insert') {
-      if (tabel == 'tugas_kunjungan') {
-        listBaru.insert(0, {
-          ...data,
-          'nama_tugas': data['nama_tugas'] ?? '-',
-          'tanggal_tugas':
-              data['tanggal_tugas']?.toString() ??
-              data['created_at']?.toString(),
-          'status_tugas': data['status_tugas'] ?? data['status'] ?? 'pending',
-          'metode_pembayaran':
-              data['metode_pembayaran'] ?? data['metode_bayar'],
-          'jumlah_pembayaran_tunai':
-              data['jumlah_pembayaran_tunai'] ?? data['total_dibayar'],
-        });
-      } else {
-        listBaru.insert(0, data);
-      }
+      listBaru.insert(0, data);
     } else if (aksi == 'update') {
       final i = listBaru.indexWhere((e) => e['id'] == data['id']);
       if (i != -1) {
-        listBaru[i] = tabel == 'tugas_kunjungan'
-            ? {
-                ...listBaru[i],
-                ...data,
-                'status_tugas':
-                    data['status_tugas'] ??
-                    data['status'] ??
-                    listBaru[i]['status_tugas'],
-                'metode_pembayaran':
-                    data['metode_pembayaran'] ??
-                    data['metode_bayar'] ??
-                    listBaru[i]['metode_pembayaran'],
-                'jumlah_pembayaran_tunai':
-                    data['jumlah_pembayaran_tunai'] ??
-                    data['total_dibayar'] ??
-                    listBaru[i]['jumlah_pembayaran_tunai'],
-              }
-            : data;
+        listBaru[i] = {...listBaru[i], ...data};
       }
     } else if (aksi == 'delete') {
       listBaru.removeWhere((e) => e['id'] == data['id']);
     }
 
     notifier.value = listBaru;
-    final cacheKey = tabel == 'tugas_kunjungan'
-        ? 'cache_tugas_kunjungan'
-        : 'cache_$tabel';
-    _prefs.setString(cacheKey, jsonEncode(listBaru));
+
+    // Simpan ke cache lokal langsung setelah update UI
+    _prefs.setString('cache_$tabel', jsonEncode(listBaru));
   }
 
   // FIXED: Moved this outside mutateData
@@ -238,7 +220,6 @@ class SyncService {
         'nama_tugas',
         'modal_awal',
         'status',
-        'tanggal',
         'created_at',
       };
     } else if (tabel == 'tugas_kunjungan') {
@@ -250,6 +231,7 @@ class SyncService {
         'metode_bayar',
         'total_dibayar',
         'created_at',
+        'urutan',
       };
     } else if (tabel == 'item_pesanan') {
       allowed = {
@@ -258,6 +240,25 @@ class SyncService {
         'nama_barang',
         'qty_pesanan',
         'qty_drop_real',
+      };
+    } else if (tabel == 'tugas_item') {
+      allowed = {
+        'id',
+        'kunjungan_id',
+        'barang_id',
+        'qty_diminta',
+        'qty_dikirim',
+        'harga_total',
+        'created_at',
+      };
+    } else if (tabel == 'muatan_tugas') {
+      allowed = {
+        'id',
+        'tugas_id',
+        'barang_id',
+        'qty_bawa',
+        'qty_sisa',
+        'created_at',
       };
     } else if (tabel == 'karyawan') {
       allowed = {'id', 'nama', 'role', 'created_at'};
