@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
+import '../services/supabase_config.dart'; // Ditambahkan untuk akses query audit log
 import '../widgets/app_snackbar.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -162,7 +163,6 @@ class _AdminScreenState extends State<AdminScreen>
   // --- Detail & Timeline Functions ---
 
   void _showTugasDetail(Map<String, dynamic> tugas) {
-    // (1 & 2: Data fetching & Controller setup remains exactly the same)
     List<Map<String, dynamic>> kunjunganRaw = [];
     List<Map<String, dynamic>> muatanRaw = [];
     final semuaTugasItem = SyncService.instance.daftarTugasItem.value;
@@ -228,10 +228,8 @@ class _AdminScreenState extends State<AdminScreen>
       });
     }
 
-    // STATE UNTUK ACCORDION
     bool isEditExpanded = false;
 
-    // 3. TAMPILKAN BOTTOM SHEET
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -240,7 +238,6 @@ class _AdminScreenState extends State<AdminScreen>
         return StatefulBuilder(
           builder: (context, setModal) {
             return ConstrainedBox(
-              // Batasi tinggi maksimal agar tidak melebihi layar
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.95,
               ),
@@ -258,7 +255,6 @@ class _AdminScreenState extends State<AdminScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // --- DRAG HANDLE ---
                       Center(
                         child: Container(
                           width: 40,
@@ -271,7 +267,6 @@ class _AdminScreenState extends State<AdminScreen>
                       ),
                       const SizedBox(height: 24),
 
-                      // --- BAGIAN 1: HEADER & TIMELINE (SELALU TERLIHAT) ---
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Column(
@@ -298,7 +293,6 @@ class _AdminScreenState extends State<AdminScreen>
                         ),
                       ),
 
-                      // --- ACCORDION TRIGGER ---
                       BouncingExpandArrow(
                         isExpanded: isEditExpanded,
                         collapsedLabel: isCompletedTugas
@@ -314,7 +308,6 @@ class _AdminScreenState extends State<AdminScreen>
                         },
                       ),
 
-                      // --- BAGIAN 2: FORM EDIT (DIBUNGKUS ANIMATEDSIZE) ---
                       AnimatedSize(
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.easeInOut,
@@ -324,7 +317,6 @@ class _AdminScreenState extends State<AdminScreen>
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  // Pemisah yang hanya muncul saat accordion terbuka
                                   Container(
                                     color: Colors.grey.shade50,
                                     padding: const EdgeInsets.symmetric(
@@ -408,7 +400,6 @@ class _AdminScreenState extends State<AdminScreen>
                                             ),
                                           ),
 
-                                          // --- KLIEN & PERMINTAAN ---
                                           const SizedBox(height: 24),
                                           const Text(
                                             'Daftar Klien & Permintaan',
@@ -553,7 +544,6 @@ class _AdminScreenState extends State<AdminScreen>
                                             ),
                                           ),
 
-                                          // --- MUATAN KENDARAAN ---
                                           const SizedBox(height: 24),
                                           const Text(
                                             'Muatan Kendaraan',
@@ -662,7 +652,6 @@ class _AdminScreenState extends State<AdminScreen>
 
                                           const SizedBox(height: 32),
 
-                                          // --- SAVE BUTTON ---
                                           FilledButton(
                                             style: FilledButton.styleFrom(
                                               padding: const EdgeInsets.all(16),
@@ -916,52 +905,208 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  // UPDATED: Ringkasan detail per klien + alasan + waktu pengerjaan dari audit_log
   Widget _buildCompletedTugasInfo(Map<String, dynamic> tugas) {
     final kunjungan = SyncService.instance.daftarTugasKunjungan.value
         .where((k) => k['tugas_id'] == tugas['id'])
         .toList();
-    final kunjunganIds = kunjungan.map((e) => e['id']).toSet();
-    final items = SyncService.instance.daftarTugasItem.value
-        .where((ti) => kunjunganIds.contains(ti['kunjungan_id']))
-        .toList();
-    final totalDiminta = items.fold<int>(
-      0,
-      (sum, item) => sum + (int.tryParse('${item['qty_diminta'] ?? 0}') ?? 0),
-    );
-    final totalDikirim = items.fold<int>(
-      0,
-      (sum, item) => sum + (int.tryParse('${item['qty_dikirim'] ?? 0}') ?? 0),
-    );
-    final alasan = kunjungan
-        .map((k) => k['catatan']?.toString().trim() ?? '')
-        .where((text) => text.isNotEmpty)
-        .toList();
 
-    return Card(
-      color: Colors.blue.shade50,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Status: ${(tugas['status'] ?? tugas['status_tugas'] ?? '-').toString().toUpperCase()}',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          color: Colors.blue.shade50,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.blue.shade200),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'Status Tugas: ${(tugas['status'] ?? tugas['status_tugas'] ?? '-').toString().toUpperCase()}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            const SizedBox(height: 8),
-            Text('Total Requested: $totalDiminta'),
-            Text('Total Delivered: $totalDikirim'),
-            if (alasan.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Alasan/Catatan:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 6),
-              ...alasan.map((a) => Text('• $a')),
-            ],
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 16),
+        const Text(
+          'Detail Kunjungan (Klien):',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        const SizedBox(height: 12),
+        ...kunjungan.map((k) {
+          final kunjunganId = k['id'];
+          final items = SyncService.instance.daftarTugasItem.value
+              .where((ti) => ti['kunjungan_id'] == kunjunganId)
+              .toList();
+
+          final statusKunjungan = (k['status_kunjungan'] ?? k['status'] ?? '-')
+              .toString();
+          final isDelivered = statusKunjungan == 'delivered';
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            elevation: 1,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: isDelivered
+                    ? Colors.green.shade200
+                    : Colors.red.shade200,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          k['nama_klien'] ?? 'Klien',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDelivered
+                              ? Colors.green.shade100
+                              : Colors.red.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          statusKunjungan.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isDelivered
+                                ? Colors.green.shade800
+                                : Colors.red.shade800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  ...items.map((item) {
+                    final barangId = item['barang_id'];
+                    final barang = SyncService.instance.daftarBarang.value
+                        .firstWhere(
+                          (b) => b['id'] == barangId,
+                          orElse: () => <String, dynamic>{},
+                        );
+                    final namaBarang = barang['nama'] ?? 'Barang';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '• $namaBarang:\n   Diminta: ${item['qty_diminta'] ?? 0}  |  Dikirim: ${item['qty_dikirim'] ?? 0}',
+                        style: const TextStyle(height: 1.4),
+                      ),
+                    );
+                  }),
+                  if (k['catatan'] != null &&
+                      k['catatan'].toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Alasan / Catatan Driver:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      k['catatan'],
+                      style: TextStyle(color: Colors.grey.shade800),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  // Menarik tanggal pengerjaan real-time dari Audit Log Supabase
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: SupabaseConfig.client
+                        .from('audit_log')
+                        .select()
+                        .eq('table_name', 'tugas_kunjungan')
+                        .eq('record_id', kunjunganId)
+                        .order('created_at', ascending: false)
+                        .limit(1),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Text(
+                          'Waktu Penyelesaian: Memuat...',
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        );
+                      }
+
+                      // Tangkap jika ada error koneksi / RLS (Row Level Security) Supabase
+                      if (snapshot.hasError) {
+                        return Text(
+                          'Error Log: ${snapshot.error}',
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 12,
+                          ),
+                        );
+                      }
+
+                      // Tangkap jika data audit_log untuk record ini tidak ada
+                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                        return const Text(
+                          'Waktu Penyelesaian: - (Log tidak ditemukan)',
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        );
+                      }
+
+                      final log = snapshot.data!.first;
+                      final createdAt = log['created_at'];
+
+                      if (createdAt != null) {
+                        // Fix parsing issue by standardizing string for Dart's DateTime.tryParse
+                        String dateString = createdAt.toString();
+                        if (!dateString.contains('T')) {
+                          dateString = dateString.replaceFirst(' ', 'T');
+                        }
+
+                        final date = DateTime.tryParse(dateString);
+                        if (date != null) {
+                          final local = date.toLocal();
+                          return Text(
+                            'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}',
+                            style: TextStyle(
+                              color: Colors.grey.shade700,
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          );
+                        } else {
+                          return Text(
+                            'Waktu Penyelesaian: (Format Date Error: $dateString)',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                            ),
+                          );
+                        }
+                      }
+
+                      return const Text(
+                        'Waktu Penyelesaian: -',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -990,8 +1135,6 @@ class _AdminScreenState extends State<AdminScreen>
         final isFailed = status == 'failed';
         final isLast = index == visits.length - 1;
 
-        // Find if this is the "active" destination (the first pending node)
-        // A node is active if it's pending, AND the one before it is NOT pending.
         final isActiveLocation =
             status == 'pending' &&
             (index == 0 ||
@@ -1009,7 +1152,7 @@ class _AdminScreenState extends State<AdminScreen>
           icon = Icons.cancel;
         } else if (isActiveLocation) {
           dotColor = Colors.blue;
-          icon = Icons.local_shipping; // Driver current target
+          icon = Icons.local_shipping;
         } else {
           dotColor = Colors.grey.shade400;
           icon = Icons.circle_outlined;
@@ -1019,7 +1162,6 @@ class _AdminScreenState extends State<AdminScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Column for the Line and Icon
               SizedBox(
                 width: 40,
                 child: Column(
@@ -1047,7 +1189,6 @@ class _AdminScreenState extends State<AdminScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              // Column for the Text Data
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 24.0, top: 4),
@@ -1371,8 +1512,7 @@ class _AdminScreenState extends State<AdminScreen>
 
     await showModalBottomSheet<void>(
       context: context,
-      isScrollControlled:
-          true, // This allows the sheet to expand to full screen height if needed
+      isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -1384,7 +1524,6 @@ class _AdminScreenState extends State<AdminScreen>
               left: 24,
               right: 24,
               top: 12,
-              // This pushes the content up when the keyboard appears
               bottom: MediaQuery.of(context).viewInsets.bottom + 24,
             ),
             child: SingleChildScrollView(
@@ -1392,7 +1531,6 @@ class _AdminScreenState extends State<AdminScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Bottom sheet drag handle indicator
                   Center(
                     child: Container(
                       width: 40,
@@ -1546,7 +1684,6 @@ class _AdminScreenState extends State<AdminScreen>
                               ),
                             ),
                           ),
-                          // Only show delete icon if there's more than 1 row
                           if (kunjungan.length > 1) ...[
                             const SizedBox(width: 4),
                             IconButton(
@@ -1828,6 +1965,7 @@ class _AdminScreenState extends State<AdminScreen>
       },
     );
   }
+
   // --- Tabs ---
 
   Widget _tabGudang() {
@@ -1950,8 +2088,7 @@ class _AdminScreenState extends State<AdminScreen>
 
             return Card(
               margin: EdgeInsets.zero,
-              clipBehavior:
-                  Clip.antiAlias, // Required for InkWell splash effect
+              clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () {
                   final itemId = item['id']?.toString();
@@ -1961,7 +2098,7 @@ class _AdminScreenState extends State<AdminScreen>
                     return;
                   }
                   _showTugasDetail(item);
-                }, // Open the detail drawer
+                },
                 onLongPress: () {
                   final itemId = item['id']?.toString();
                   if (itemId == null) return;
@@ -2029,7 +2166,6 @@ class _AdminScreenState extends State<AdminScreen>
                             color: Colors.grey,
                           ),
                           const SizedBox(width: 8),
-                          // Fallback check based on how your data is joined
                           Text(
                             'Driver: ${item['nama_driver'] ?? 'Karyawan ID: ${item['karyawan_id']}'}',
                           ),
@@ -2179,10 +2315,6 @@ class _AdminScreenState extends State<AdminScreen>
                         type: AppSnackbarType.info,
                       );
                       try {
-                        // Call your sync method here
-                        // await SyncService.instance.sync();
-
-                        // Simulating a delay for the UI feel (remove this in production)
                         await Future.delayed(const Duration(seconds: 1));
 
                         if (context.mounted) {
@@ -2257,14 +2389,14 @@ class _AdminScreenState extends State<AdminScreen>
 
 class BouncingExpandArrow extends StatefulWidget {
   final VoidCallback onTap;
-  final bool isExpanded; // Tambahkan properti ini
+  final bool isExpanded;
   final String collapsedLabel;
   final String expandedLabel;
 
   const BouncingExpandArrow({
     super.key,
     required this.onTap,
-    this.isExpanded = false, // Default false
+    this.isExpanded = false,
     this.collapsedLabel = 'Ketuk untuk Edit Detail Tugas',
     this.expandedLabel = 'Tutup Form Edit',
   });
