@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
 
 class DriverScreen extends StatelessWidget {
-  const DriverScreen({super.key});
+  const DriverScreen({super.key, required this.onToggleDashboard});
+
+  final VoidCallback onToggleDashboard;
 
   Future<void> _kelolaTugas(
     BuildContext context,
@@ -46,14 +48,16 @@ class DriverScreen extends StatelessWidget {
                     fontSize: 18,
                   ),
                 ),
+                const SizedBox(height: 4),
+                Text('Klien: ${tugas['nama_klien'] ?? '-'}'),
                 const SizedBox(height: 8),
                 FilledButton.tonal(
-                  onPressed: tugas['status_tugas'] == 'menunggu'
+                  onPressed: tugas['status_tugas'] == 'pending'
                       ? () async {
                           await SyncService.instance.mutateData(
-                            'tugas_pengantaran',
+                            'tugas',
                             'update',
-                            {...tugas, 'status_tugas': 'dalam_proses'},
+                            {'id': tugas['tugas_id'], 'status': 'in_progress'},
                           );
                           if (context.mounted) Navigator.pop(context);
                         }
@@ -67,7 +71,7 @@ class DriverScreen extends StatelessWidget {
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
                       labelText:
-                          'Dropout real ${item['nama_barang']} (pesan: ${item['qty_pesanan']})',
+                          'Drop real ${item['nama_barang']} (pesan: ${item['qty_pesanan']})',
                     ),
                   ),
                 ),
@@ -82,12 +86,13 @@ class DriverScreen extends StatelessWidget {
                       value: 'transfer',
                       child: Text('Transfer'),
                     ),
-                    DropdownMenuItem(value: 'tunai', child: Text('Tunai')),
+                    DropdownMenuItem(value: 'cash', child: Text('Tunai')),
+                    DropdownMenuItem(value: 'tempo', child: Text('Tempo')),
                   ],
                   onChanged: (value) =>
                       setModal(() => metode = value ?? 'transfer'),
                 ),
-                if (metode == 'tunai')
+                if (metode == 'cash')
                   TextField(
                     controller: tunaiCtrl,
                     keyboardType: TextInputType.number,
@@ -108,13 +113,19 @@ class DriverScreen extends StatelessWidget {
                     }
 
                     await SyncService.instance
-                        .mutateData('tugas_pengantaran', 'update', {
-                          ...tugas,
-                          'metode_pembayaran': metode,
-                          'jumlah_pembayaran_tunai': metode == 'tunai'
+                        .mutateData('tugas_kunjungan', 'update', {
+                          'id': tugas['id'],
+                          'tugas_id': tugas['tugas_id'],
+                          'status': 'delivered',
+                          'metode_bayar': metode,
+                          'total_dibayar': metode == 'cash'
                               ? double.tryParse(tunaiCtrl.text) ?? 0
-                              : null,
+                              : 0,
                         });
+                    await SyncService.instance.mutateData('tugas', 'update', {
+                      'id': tugas['tugas_id'],
+                      'status': 'completed',
+                    });
 
                     if (context.mounted) Navigator.pop(context);
                   },
@@ -130,29 +141,50 @@ class DriverScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Layar Driver')),
-      body: ValueListenableBuilder<List<Map<String, dynamic>>>(
-        valueListenable: SyncService.instance.daftarTugas,
-        builder: (context, tugas, _) {
-          if (tugas.isEmpty)
-            return const Center(child: Text('Belum ada tugas untuk driver.'));
-          return ListView.builder(
-            itemCount: tugas.length,
-            itemBuilder: (context, index) {
-              final item = tugas[index];
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  title: Text(item['nama_tugas'] ?? '-'),
-                  subtitle: Text('Status: ${item['status_tugas']}'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _kelolaTugas(context, item),
-                ),
-              );
-            },
-          );
-        },
+    return DefaultTabController(
+      length: 1,
+      child: Scaffold(
+        appBar: AppBar(
+          title: GestureDetector(
+            onTap: onToggleDashboard,
+            child: const Text('Admin Dashboard'),
+          ),
+          bottom: const TabBar(tabs: [Tab(text: 'Tugas')]),
+        ),
+        body: TabBarView(
+          children: [
+            ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: SyncService.instance.daftarTugas,
+              builder: (context, tugas, _) {
+                if (tugas.isEmpty) {
+                  return const Center(
+                    child: Text('Belum ada tugas untuk driver.'),
+                  );
+                }
+                return ListView.builder(
+                  itemCount: tugas.length,
+                  itemBuilder: (context, index) {
+                    final item = tugas[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      child: ListTile(
+                        title: Text(item['nama_tugas'] ?? '-'),
+                        subtitle: Text(
+                          'Klien: ${item['nama_klien'] ?? '-'} | Status: ${item['status_tugas']}',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _kelolaTugas(context, item),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

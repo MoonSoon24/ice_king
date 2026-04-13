@@ -25,17 +25,9 @@ class _AdminAppState extends State<AdminApp> {
       home: Scaffold(
         body: IndexedStack(
           index: _index,
-          children: const [AdminScreen(), DriverScreen()],
-        ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: (value) => setState(() => _index = value),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.dashboard), label: 'Admin'),
-            NavigationDestination(
-              icon: Icon(Icons.local_shipping),
-              label: 'Driver',
-            ),
+          children: [
+            AdminScreen(onToggleDashboard: () => setState(() => _index = 1)),
+            DriverScreen(onToggleDashboard: () => setState(() => _index = 0)),
           ],
         ),
       ),
