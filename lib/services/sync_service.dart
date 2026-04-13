@@ -234,6 +234,7 @@ class SyncService {
         'total_dibayar',
         'created_at',
         'urutan',
+        'waktu_selesai',
       };
     } else if (tabel == 'item_pesanan') {
       allowed = {

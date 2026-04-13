@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
-import '../services/supabase_config.dart'; // Ditambahkan untuk akses query audit log
 import '../widgets/app_snackbar.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -17,6 +16,7 @@ class _AdminScreenState extends State<AdminScreen>
   late final TabController _tabController;
   final Set<String> _selectedGudangIds = <String>{};
   final Set<String> _selectedTugasIds = <String>{};
+  final Set<String> _selectedKlienIds = <String>{}; // DITAMBAHKAN
 
   @override
   void initState() {
@@ -24,10 +24,13 @@ class _AdminScreenState extends State<AdminScreen>
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
-      if (_selectedGudangIds.isNotEmpty || _selectedTugasIds.isNotEmpty) {
+      if (_selectedGudangIds.isNotEmpty ||
+          _selectedTugasIds.isNotEmpty ||
+          _selectedKlienIds.isNotEmpty) {
         setState(() {
           _selectedGudangIds.clear();
           _selectedTugasIds.clear();
+          _selectedKlienIds.clear(); // DITAMBAHKAN
         });
       }
     });
@@ -45,12 +48,27 @@ class _AdminScreenState extends State<AdminScreen>
   bool get _isSelectingTugas =>
       _tabController.index == 1 && _selectedTugasIds.isNotEmpty;
 
-  bool get _isSelectionMode => _isSelectingGudang || _isSelectingTugas;
+  bool get _isSelectingKlien =>
+      _tabController.index == 2 && _selectedKlienIds.isNotEmpty;
+
+  bool get _isSelectionMode =>
+      _isSelectingGudang || _isSelectingTugas || _isSelectingKlien;
 
   bool _isItemSelected(String id) {
     if (_tabController.index == 0) return _selectedGudangIds.contains(id);
     if (_tabController.index == 1) return _selectedTugasIds.contains(id);
+    if (_tabController.index == 2) return _selectedKlienIds.contains(id);
     return false;
+  }
+
+  void _toggleKlienSelection(String id) {
+    setState(() {
+      if (_selectedKlienIds.contains(id)) {
+        _selectedKlienIds.remove(id);
+      } else {
+        _selectedKlienIds.add(id);
+      }
+    });
   }
 
   void _toggleGudangSelection(String id) {
@@ -105,17 +123,43 @@ class _AdminScreenState extends State<AdminScreen>
             ..addAll(ids);
         }
       });
+      return;
+    }
+
+    if (_tabController.index == 2) {
+      // TAMBAHAN UNTUK KLIEN
+      final ids = SyncService.instance.daftarKlien.value
+          .map((e) => e['id']?.toString())
+          .whereType<String>()
+          .toSet();
+      setState(() {
+        if (_selectedKlienIds.length == ids.length && ids.isNotEmpty) {
+          _selectedKlienIds.clear();
+        } else {
+          _selectedKlienIds
+            ..clear()
+            ..addAll(ids);
+        }
+      });
     }
   }
 
   Future<void> _confirmDeleteSelected() async {
     final isGudangTab = _tabController.index == 0;
+    final isTugasTab = _tabController.index == 1;
+    final isKlienTab = _tabController.index == 2;
+
     final ids = isGudangTab
         ? _selectedGudangIds.toList(growable: false)
-        : _selectedTugasIds.toList(growable: false);
+        : isTugasTab
+        ? _selectedTugasIds.toList(growable: false)
+        : _selectedKlienIds.toList(growable: false);
+
     if (ids.isEmpty) return;
 
-    final targetLabel = isGudangTab ? 'barang gudang' : 'tugas';
+    final targetLabel = isGudangTab
+        ? 'barang gudang'
+        : (isTugasTab ? 'tugas' : 'klien');
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -141,7 +185,7 @@ class _AdminScreenState extends State<AdminScreen>
 
     if (confirmed != true) return;
 
-    final table = isGudangTab ? 'barang' : 'tugas';
+    final table = isGudangTab ? 'barang' : (isTugasTab ? 'tugas' : 'klien');
     for (final id in ids) {
       await SyncService.instance.mutateData(table, 'delete', {
         'id': id,
@@ -152,6 +196,7 @@ class _AdminScreenState extends State<AdminScreen>
     setState(() {
       _selectedGudangIds.clear();
       _selectedTugasIds.clear();
+      _selectedKlienIds.clear(); // TAMBAHAN UNTUK KLIEN
     });
     AppSnackbar.show(
       context,
@@ -905,6 +950,20 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  String _formatWaktuSelesai(Map<String, dynamic> kunjungan) {
+    final raw = kunjungan['completed_at_local'];
+    if (raw == null) {
+      return 'Waktu Penyelesaian: - (offline timestamp belum tersedia)';
+    }
+
+    final parsed = DateTime.tryParse(raw.toString());
+    if (parsed == null)
+      return 'Waktu Penyelesaian: - (format waktu tidak valid)';
+
+    final local = parsed.toLocal();
+    return 'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
   // UPDATED: Ringkasan detail per klien + alasan + waktu pengerjaan dari audit_log
   Widget _buildCompletedTugasInfo(Map<String, dynamic> tugas) {
     final kunjungan = SyncService.instance.daftarTugasKunjungan.value
@@ -936,9 +995,8 @@ class _AdminScreenState extends State<AdminScreen>
         ),
         const SizedBox(height: 12),
         ...kunjungan.map((k) {
-          final kunjunganId = k['id'];
           final items = SyncService.instance.daftarTugasItem.value
-              .where((ti) => ti['kunjungan_id'] == kunjunganId)
+              .where((ti) => ti['kunjungan_id'] == k['id'])
               .toList();
 
           final statusKunjungan = (k['status_kunjungan'] ?? k['status'] ?? '-')
@@ -1027,79 +1085,13 @@ class _AdminScreenState extends State<AdminScreen>
                     ),
                   ],
                   const SizedBox(height: 12),
-                  // Menarik tanggal pengerjaan real-time dari Audit Log Supabase
-                  FutureBuilder<List<Map<String, dynamic>>>(
-                    future: SupabaseConfig.client
-                        .from('audit_log')
-                        .select()
-                        .eq('table_name', 'tugas_kunjungan')
-                        .eq('record_id', kunjunganId)
-                        .order('created_at', ascending: false)
-                        .limit(1),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Text(
-                          'Waktu Penyelesaian: Memuat...',
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        );
-                      }
-
-                      // Tangkap jika ada error koneksi / RLS (Row Level Security) Supabase
-                      if (snapshot.hasError) {
-                        return Text(
-                          'Error Log: ${snapshot.error}',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontSize: 12,
-                          ),
-                        );
-                      }
-
-                      // Tangkap jika data audit_log untuk record ini tidak ada
-                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                        return const Text(
-                          'Waktu Penyelesaian: - (Log tidak ditemukan)',
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        );
-                      }
-
-                      final log = snapshot.data!.first;
-                      final createdAt = log['created_at'];
-
-                      if (createdAt != null) {
-                        // Fix parsing issue by standardizing string for Dart's DateTime.tryParse
-                        String dateString = createdAt.toString();
-                        if (!dateString.contains('T')) {
-                          dateString = dateString.replaceFirst(' ', 'T');
-                        }
-
-                        final date = DateTime.tryParse(dateString);
-                        if (date != null) {
-                          final local = date.toLocal();
-                          return Text(
-                            'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}',
-                            style: TextStyle(
-                              color: Colors.grey.shade700,
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          );
-                        } else {
-                          return Text(
-                            'Waktu Penyelesaian: (Format Date Error: $dateString)',
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontSize: 12,
-                            ),
-                          );
-                        }
-                      }
-
-                      return const Text(
-                        'Waktu Penyelesaian: -',
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      );
-                    },
+                  Text(
+                    _formatWaktuSelesai(k),
+                    style: TextStyle(
+                      color: Colors.grey.shade700,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
                 ],
               ),
@@ -1350,6 +1342,74 @@ class _AdminScreenState extends State<AdminScreen>
       ),
     );
     return createdId;
+  }
+
+  Future<void> _editKlien(Map<String, dynamic> klien) async {
+    final ctrlNama = TextEditingController(
+      text: klien['nama']?.toString() ?? '',
+    );
+    final ctrlAlamat = TextEditingController(
+      text: klien['alamat']?.toString() ?? '',
+    );
+    final ctrlKontak = TextEditingController(
+      text: klien['kontak']?.toString() ?? '',
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Klien'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrlNama,
+                decoration: const InputDecoration(
+                  labelText: 'Nama klien',
+                  prefixIcon: Icon(Icons.business),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrlAlamat,
+                decoration: const InputDecoration(
+                  labelText: 'Alamat',
+                  prefixIcon: Icon(Icons.location_on),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrlKontak,
+                decoration: const InputDecoration(
+                  labelText: 'Kontak',
+                  prefixIcon: Icon(Icons.phone),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              if (ctrlNama.text.trim().isEmpty) return;
+              await SyncService.instance.mutateData('klien', 'update', {
+                'id': klien['id'],
+                'nama': ctrlNama.text.trim(),
+                'alamat': ctrlAlamat.text.trim(),
+                'kontak': ctrlKontak.text.trim(),
+              });
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('Simpan Perubahan'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _buatBarang() async {
@@ -2182,89 +2242,97 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Widget _tabLaporan() {
+  Widget _tabKlien() {
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
-      valueListenable: SyncService.instance.daftarTugas,
-      builder: (context, tugas, _) {
-        final pending = tugas
-            .where((e) => e['status_tugas'] == 'pending')
-            .length;
-        final selesai = tugas
-            .where((e) => e['status_tugas'] == 'completed')
-            .length;
-
-        return ListView(
+      valueListenable: SyncService.instance.daftarKlien,
+      builder: (context, klienList, _) {
+        if (klienList.isEmpty) {
+          return _buildEmptyState(
+            Icons.business_outlined,
+            'Belum ada data klien.',
+          );
+        }
+        return ListView.separated(
           padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    const Icon(
-                      Icons.analytics,
-                      size: 48,
-                      color: Color(0xFF0288D1),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Ringkasan Tugas',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildStatItem(
-                          'Total',
-                          tugas.length.toString(),
-                          Colors.blue,
-                        ),
-                        _buildStatItem(
-                          'Menunggu',
-                          pending.toString(),
-                          Colors.orange,
-                        ),
-                        _buildStatItem(
-                          'Selesai',
-                          selesai.toString(),
-                          Colors.green,
-                        ),
-                      ],
-                    ),
-                  ],
+          itemCount: klienList.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final item = klienList[index];
+            return Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                onTap: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  if (_isSelectingKlien) {
+                    _toggleKlienSelection(itemId);
+                    return;
+                  }
+                  _editKlien(item);
+                },
+                onLongPress: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  _toggleKlienSelection(itemId);
+                },
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
+                leading: _isSelectingKlien
+                    ? Checkbox(
+                        value: _isItemSelected(item['id']?.toString() ?? ''),
+                        onChanged: (_) =>
+                            _toggleKlienSelection(item['id']?.toString() ?? ''),
+                      )
+                    : CircleAvatar(
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.primaryContainer,
+                        child: Icon(
+                          Icons.business,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                title: Text(
+                  item['nama']?.toString() ?? '-',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Text(
+                    '${item['alamat'] ?? '-'}\nKontak: ${item['kontak'] ?? '-'}',
+                    style: const TextStyle(height: 1.4),
+                  ),
+                ),
+                trailing: _isSelectingKlien
+                    ? null
+                    : Wrap(
+                        spacing: 4,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => _editKlien(item),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.redAccent,
+                            ),
+                            onPressed: () => SyncService.instance.mutateData(
+                              'klien',
+                              'delete',
+                              {'id': item['id']},
+                            ),
+                          ),
+                        ],
+                      ),
+                isThreeLine: true,
               ),
-            ),
-          ],
+            );
+          },
         );
       },
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, MaterialColor color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: color.shade700,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
     );
   }
 
@@ -2274,7 +2342,11 @@ class _AdminScreenState extends State<AdminScreen>
       appBar: AppBar(
         title: Text(
           _isSelectionMode
-              ? '${_tabController.index == 0 ? _selectedGudangIds.length : _selectedTugasIds.length} dipilih'
+              ? '${_tabController.index == 0
+                    ? _selectedGudangIds.length
+                    : _tabController.index == 1
+                    ? _selectedTugasIds.length
+                    : _selectedKlienIds.length} dipilih'
               : 'Admin Dashboard',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
@@ -2285,6 +2357,7 @@ class _AdminScreenState extends State<AdminScreen>
                   setState(() {
                     _selectedGudangIds.clear();
                     _selectedTugasIds.clear();
+                    _selectedKlienIds.clear();
                   });
                 },
               )
@@ -2309,14 +2382,22 @@ class _AdminScreenState extends State<AdminScreen>
                   child: IconButton(
                     icon: const Icon(Icons.sync),
                     onPressed: () async {
+                      if (!SyncService.instance.isOnline) {
+                        AppSnackbar.show(
+                          context,
+                          'Anda sedang offline. Sinkronisasi otomatis saat online.',
+                          type: AppSnackbarType.warning,
+                        );
+                        return;
+                      }
+
                       AppSnackbar.show(
                         context,
                         'Menyinkronkan data ke server...',
                         type: AppSnackbarType.info,
                       );
                       try {
-                        await Future.delayed(const Duration(seconds: 1));
-
+                        await SyncService.instance.sinkronkanSemua();
                         if (context.mounted) {
                           AppSnackbar.show(
                             context,
@@ -2352,13 +2433,13 @@ class _AdminScreenState extends State<AdminScreen>
           tabs: const [
             Tab(icon: Icon(Icons.inventory_2), text: 'Gudang'),
             Tab(icon: Icon(Icons.assignment), text: 'Tugas'),
-            Tab(icon: Icon(Icons.bar_chart), text: 'Laporan'),
+            Tab(icon: Icon(Icons.business), text: 'Klien'), // UPDATED
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_tabGudang(), _tabTugas(), _tabLaporan()],
+        children: [_tabGudang(), _tabTugas(), _tabKlien()], // UPDATED
       ),
       floatingActionButton: AnimatedBuilder(
         animation: _tabController,
@@ -2378,6 +2459,13 @@ class _AdminScreenState extends State<AdminScreen>
               onPressed: _buatTugas,
               icon: const Icon(Icons.add_task),
               label: const Text('Buat tugas'),
+            );
+          }
+          if (_tabController.index == 2) {
+            return FloatingActionButton.extended(
+              onPressed: _buatKlienBaru,
+              icon: const Icon(Icons.add_business),
+              label: const Text('Klien Baru'),
             );
           }
           return const SizedBox.shrink();

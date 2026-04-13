@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/sync_service.dart';
-import '../services/supabase_config.dart'; // Ditambahkan untuk akses query audit log
 import '../widgets/app_snackbar.dart';
 
 // ==========================================
@@ -311,6 +310,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       'total_dibayar': _metode == 'cash'
           ? (double.tryParse(_tunaiCtrl.text) ?? 0)
           : 0,
+      'waktu_selesai': DateTime.now().toIso8601String(),
     }, showSnackbar: false);
 
     await _cekStatusTugasSelesai(
@@ -327,6 +327,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       'id': activeKunjungan['id'],
       'status': 'failed',
       'catatan': catatan.trim(),
+      'waktu_selesai': DateTime.now().toIso8601String(),
     }, showSnackbar: false);
 
     await _cekStatusTugasSelesai(
@@ -790,6 +791,20 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     );
   }
 
+  String _formatWaktuSelesai(Map<String, dynamic> kunjungan) {
+    final raw = kunjungan['completed_at_local'];
+    if (raw == null) {
+      return 'Waktu Penyelesaian: - (offline timestamp belum tersedia)';
+    }
+
+    final parsed = DateTime.tryParse(raw.toString());
+    if (parsed == null)
+      return 'Waktu Penyelesaian: - (format waktu tidak valid)';
+
+    final local = parsed.toLocal();
+    return 'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
   // UPDATED: Menampilkan detil ringkasan untuk seluruh klien bila selesai tugas layaknya Admin Screen
   Widget _buildCompletedSummary() {
     return SingleChildScrollView(
@@ -828,7 +843,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           ..._kunjunganList.map((k) {
             final kunjunganId = k['id'];
             final items = SyncService.instance.daftarTugasItem.value
-                .where((ti) => ti['kunjungan_id'] == kunjunganId)
+                .where((ti) => ti['kunjungan_id'] == k['id'])
                 .toList();
 
             final statusKunjungan =
@@ -912,70 +927,13 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                       Text(k['catatan']),
                     ],
                     const SizedBox(height: 12),
-                    // Menarik tanggal pengerjaan real-time dari Audit Log
-                    FutureBuilder<List<Map<String, dynamic>>>(
-                      future: SupabaseConfig.client
-                          .from('audit_log')
-                          .select()
-                          .eq('table_name', 'tugas_kunjungan')
-                          .eq('record_id', kunjunganId)
-                          .order('created_at', ascending: false)
-                          .limit(1),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Text(
-                            'Waktu: Memuat...',
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
-                          );
-                        }
-
-                        // Tangkap jika ada error koneksi / RLS (Row Level Security)
-                        if (snapshot.hasError) {
-                          return Text(
-                            'Error Log: ${snapshot.error}',
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontSize: 12,
-                            ),
-                          );
-                        }
-
-                        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                          return const Text(
-                            'Waktu Penyelesaian: - (Log tidak ditemukan)',
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
-                          );
-                        }
-
-                        final log = snapshot.data!.first;
-                        final createdAt = log['created_at'];
-
-                        if (createdAt != null) {
-                          String dateString = createdAt.toString();
-                          if (!dateString.contains('T')) {
-                            dateString = dateString.replaceFirst(' ', 'T');
-                          }
-
-                          final date = DateTime.tryParse(dateString);
-                          if (date != null) {
-                            final local = date.toLocal();
-                            return Text(
-                              'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}',
-                              style: TextStyle(
-                                color: Colors.grey.shade700,
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            );
-                          }
-                        }
-
-                        return const Text(
-                          'Waktu Penyelesaian: -',
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        );
-                      },
+                    Text(
+                      _formatWaktuSelesai(k),
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ],
                 ),
