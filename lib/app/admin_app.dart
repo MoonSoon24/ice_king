@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/admin_screen.dart';
 import '../screens/driver_screen.dart';
+import '../widgets/app_snackbar.dart';
 
 class AdminApp extends StatefulWidget {
   const AdminApp({super.key});
@@ -18,6 +19,7 @@ class _AdminAppState extends State<AdminApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Es King',
+      scaffoldMessengerKey: AppSnackbar.messengerKey,
       theme: ThemeData(
         // Use a cool blue palette fitting for "Es King"
         colorScheme: ColorScheme.fromSeed(

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'supabase_config.dart';
+import '../widgets/app_snackbar.dart';
 
 class SyncService {
   SyncService._();
@@ -228,6 +229,7 @@ class SyncService {
         'tugas_id',
         'klien_id',
         'status',
+        'catatan',
         'metode_bayar',
         'total_dibayar',
         'created_at',
@@ -284,8 +286,9 @@ class SyncService {
   Future<void> mutateData(
     String tabel,
     String aksi,
-    Map<String, dynamic> data,
-  ) async {
+    Map<String, dynamic> data, {
+    bool showSnackbar = true,
+  }) async {
     _mutateLokal(tabel, aksi, data);
 
     final antrean = _prefs.getStringList('antrean_sinkron') ?? [];
@@ -300,6 +303,25 @@ class SyncService {
 
     if (isOnline) {
       await sinkronkanSemua();
+    }
+    if (showSnackbar) {
+      final namaTabel = tabel.replaceAll('_', ' ');
+      if (aksi == 'insert') {
+        AppSnackbar.showGlobal(
+          'Data $namaTabel berhasil ditambahkan.',
+          type: AppSnackbarType.success,
+        );
+      } else if (aksi == 'update') {
+        AppSnackbar.showGlobal(
+          'Data $namaTabel berhasil diperbarui.',
+          type: AppSnackbarType.success,
+        );
+      } else if (aksi == 'delete') {
+        AppSnackbar.showGlobal(
+          'Data $namaTabel berhasil dihapus.',
+          type: AppSnackbarType.success,
+        );
+      }
     }
   }
 

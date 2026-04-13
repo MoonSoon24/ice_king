@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
+import '../widgets/app_snackbar.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key, required this.onToggleDashboard});
@@ -13,17 +14,149 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  final Set<String> _selectedGudangIds = <String>{};
+  final Set<String> _selectedTugasIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      if (_selectedGudangIds.isNotEmpty || _selectedTugasIds.isNotEmpty) {
+        setState(() {
+          _selectedGudangIds.clear();
+          _selectedTugasIds.clear();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  bool get _isSelectingGudang =>
+      _tabController.index == 0 && _selectedGudangIds.isNotEmpty;
+
+  bool get _isSelectingTugas =>
+      _tabController.index == 1 && _selectedTugasIds.isNotEmpty;
+
+  bool get _isSelectionMode => _isSelectingGudang || _isSelectingTugas;
+
+  bool _isItemSelected(String id) {
+    if (_tabController.index == 0) return _selectedGudangIds.contains(id);
+    if (_tabController.index == 1) return _selectedTugasIds.contains(id);
+    return false;
+  }
+
+  void _toggleGudangSelection(String id) {
+    setState(() {
+      if (_selectedGudangIds.contains(id)) {
+        _selectedGudangIds.remove(id);
+      } else {
+        _selectedGudangIds.add(id);
+      }
+    });
+  }
+
+  void _toggleTugasSelection(String id) {
+    setState(() {
+      if (_selectedTugasIds.contains(id)) {
+        _selectedTugasIds.remove(id);
+      } else {
+        _selectedTugasIds.add(id);
+      }
+    });
+  }
+
+  Future<void> _toggleSelectAll() async {
+    if (_tabController.index == 0) {
+      final ids = SyncService.instance.daftarBarang.value
+          .map((e) => e['id']?.toString())
+          .whereType<String>()
+          .toSet();
+      setState(() {
+        if (_selectedGudangIds.length == ids.length && ids.isNotEmpty) {
+          _selectedGudangIds.clear();
+        } else {
+          _selectedGudangIds
+            ..clear()
+            ..addAll(ids);
+        }
+      });
+      return;
+    }
+
+    if (_tabController.index == 1) {
+      final ids = SyncService.instance.daftarTugas.value
+          .map((e) => e['id']?.toString())
+          .whereType<String>()
+          .toSet();
+      setState(() {
+        if (_selectedTugasIds.length == ids.length && ids.isNotEmpty) {
+          _selectedTugasIds.clear();
+        } else {
+          _selectedTugasIds
+            ..clear()
+            ..addAll(ids);
+        }
+      });
+    }
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final isGudangTab = _tabController.index == 0;
+    final ids = isGudangTab
+        ? _selectedGudangIds.toList(growable: false)
+        : _selectedTugasIds.toList(growable: false);
+    if (ids.isEmpty) return;
+
+    final targetLabel = isGudangTab ? 'barang gudang' : 'tugas';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Konfirmasi Hapus'),
+          content: Text(
+            'Yakin ingin menghapus ${ids.length} $targetLabel terpilih? Tindakan ini tidak bisa dibatalkan.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    final table = isGudangTab ? 'barang' : 'tugas';
+    for (final id in ids) {
+      await SyncService.instance.mutateData(table, 'delete', {
+        'id': id,
+      }, showSnackbar: false);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _selectedGudangIds.clear();
+      _selectedTugasIds.clear();
+    });
+    AppSnackbar.show(
+      context,
+      '${ids.length} $targetLabel berhasil dihapus.',
+      type: AppSnackbarType.success,
+    );
   }
 
   // --- Detail & Timeline Functions ---
@@ -50,6 +183,9 @@ class _AdminScreenState extends State<AdminScreen>
       text: tugas['modal_awal']?.toString() ?? '0',
     );
     String? selectedKaryawanId = tugas['karyawan_id'] ?? tugas['id_driver'];
+    final isCompletedTugas =
+        (tugas['status'] == 'completed' ||
+        tugas['status_tugas'] == 'completed');
 
     List<Map<String, dynamic>> kunjunganEdit = kunjunganRaw.map((k) {
       final item = semuaTugasItem.firstWhere(
@@ -165,6 +301,12 @@ class _AdminScreenState extends State<AdminScreen>
                       // --- ACCORDION TRIGGER ---
                       BouncingExpandArrow(
                         isExpanded: isEditExpanded,
+                        collapsedLabel: isCompletedTugas
+                            ? 'Ketuk untuk Lihat Detail Pengiriman'
+                            : 'Ketuk untuk Edit Detail Tugas',
+                        expandedLabel: isCompletedTugas
+                            ? 'Tutup Detail Pengiriman'
+                            : 'Tutup Form Edit',
                         onTap: () {
                           setModal(() {
                             isEditExpanded = !isEditExpanded;
@@ -204,325 +346,559 @@ class _AdminScreenState extends State<AdminScreen>
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
-                                        const Text(
-                                          'Edit Detail Tugas',
-                                          style: TextStyle(
+                                        Text(
+                                          isCompletedTugas
+                                              ? 'Ringkasan Pengiriman'
+                                              : 'Edit Detail Tugas',
+                                          style: const TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 18,
                                             color: Colors.blue,
                                           ),
                                         ),
                                         const SizedBox(height: 16),
-
-                                        TextField(
-                                          controller: ctrlNamaTugas,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Nama tugas',
-                                            prefixIcon: Icon(Icons.task_alt),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-
-                                        TextField(
-                                          controller: ctrlModalAwal,
-                                          keyboardType: TextInputType.number,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Modal Awal',
-                                            prefixIcon: Icon(
-                                              Icons.attach_money,
+                                        if (isCompletedTugas) ...[
+                                          _buildCompletedTugasInfo(tugas),
+                                        ] else ...[
+                                          TextField(
+                                            controller: ctrlNamaTugas,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Nama tugas',
+                                              prefixIcon: Icon(Icons.task_alt),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 12),
+                                          const SizedBox(height: 12),
 
-                                        DropdownButtonFormField<String>(
-                                          value: selectedKaryawanId,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Pengantar (Driver)',
-                                            prefixIcon: Icon(Icons.person),
-                                          ),
-                                          items: SyncService
-                                              .instance
-                                              .daftarKaryawan
-                                              .value
-                                              .map(
-                                                (k) => DropdownMenuItem<String>(
-                                                  value: k['id'].toString(),
-                                                  child: Text(
-                                                    k['nama']?.toString() ??
-                                                        '-',
-                                                  ),
-                                                ),
-                                              )
-                                              .toList(),
-                                          onChanged: (val) => setModal(
-                                            () => selectedKaryawanId = val,
-                                          ),
-                                        ),
-
-                                        // --- KLIEN & PERMINTAAN ---
-                                        const SizedBox(height: 24),
-                                        const Text(
-                                          'Daftar Klien & Permintaan',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        ...kunjunganEdit.asMap().entries.map((
-                                          entry,
-                                        ) {
-                                          final i = entry.key;
-                                          final row = entry.value;
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 12,
+                                          TextField(
+                                            controller: ctrlModalAwal,
+                                            keyboardType: TextInputType.number,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Modal Awal',
+                                              prefixIcon: Icon(
+                                                Icons.attach_money,
+                                              ),
                                             ),
-                                            child: Row(
-                                              children: [
-                                                Expanded(
-                                                  flex: 3,
-                                                  child: DropdownButtonFormField<String>(
-                                                    value:
-                                                        row['klien_id']
-                                                            as String?,
-                                                    decoration: InputDecoration(
-                                                      labelText:
-                                                          'Klien ${i + 1}',
+                                          ),
+                                          const SizedBox(height: 12),
+
+                                          DropdownButtonFormField<String>(
+                                            value: selectedKaryawanId,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Pengantar (Driver)',
+                                              prefixIcon: Icon(Icons.person),
+                                            ),
+                                            items: SyncService
+                                                .instance
+                                                .daftarKaryawan
+                                                .value
+                                                .map(
+                                                  (
+                                                    k,
+                                                  ) => DropdownMenuItem<String>(
+                                                    value: k['id'].toString(),
+                                                    child: Text(
+                                                      k['nama']?.toString() ??
+                                                          '-',
                                                     ),
-                                                    items: SyncService
-                                                        .instance
-                                                        .daftarKlien
-                                                        .value
-                                                        .map(
-                                                          (k) =>
-                                                              DropdownMenuItem<
-                                                                String
-                                                              >(
-                                                                value: k['id']
-                                                                    .toString(),
-                                                                child: Text(
-                                                                  k['nama']
-                                                                          ?.toString() ??
-                                                                      '-',
+                                                  ),
+                                                )
+                                                .toList(),
+                                            onChanged: (val) => setModal(
+                                              () => selectedKaryawanId = val,
+                                            ),
+                                          ),
+
+                                          // --- KLIEN & PERMINTAAN ---
+                                          const SizedBox(height: 24),
+                                          const Text(
+                                            'Daftar Klien & Permintaan',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ...kunjunganEdit.asMap().entries.map((
+                                            entry,
+                                          ) {
+                                            final i = entry.key;
+                                            final row = entry.value;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    flex: 3,
+                                                    child: DropdownButtonFormField<String>(
+                                                      value:
+                                                          row['klien_id']
+                                                              as String?,
+                                                      decoration:
+                                                          InputDecoration(
+                                                            labelText:
+                                                                'Klien ${i + 1}',
+                                                          ),
+                                                      items: SyncService
+                                                          .instance
+                                                          .daftarKlien
+                                                          .value
+                                                          .map(
+                                                            (k) =>
+                                                                DropdownMenuItem<
+                                                                  String
+                                                                >(
+                                                                  value: k['id']
+                                                                      .toString(),
+                                                                  child: Text(
+                                                                    k['nama']
+                                                                            ?.toString() ??
+                                                                        '-',
+                                                                  ),
                                                                 ),
-                                                              ),
-                                                        )
-                                                        .toList(),
-                                                    onChanged: (val) =>
-                                                        setModal(
-                                                          () =>
-                                                              row['klien_id'] =
-                                                                  val,
-                                                        ),
+                                                          )
+                                                          .toList(),
+                                                      onChanged: (val) =>
+                                                          setModal(
+                                                            () =>
+                                                                row['klien_id'] =
+                                                                    val,
+                                                          ),
+                                                    ),
                                                   ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  flex: 3,
-                                                  child: DropdownButtonFormField<String>(
-                                                    value:
-                                                        row['barang_id']
-                                                            as String?,
-                                                    decoration:
-                                                        const InputDecoration(
-                                                          labelText: 'Barang',
-                                                        ),
-                                                    items: SyncService
-                                                        .instance
-                                                        .daftarBarang
-                                                        .value
-                                                        .map(
-                                                          (b) =>
-                                                              DropdownMenuItem<
-                                                                String
-                                                              >(
-                                                                value: b['id']
-                                                                    .toString(),
-                                                                child: Text(
-                                                                  b['nama']
-                                                                          ?.toString() ??
-                                                                      '-',
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    flex: 3,
+                                                    child: DropdownButtonFormField<String>(
+                                                      value:
+                                                          row['barang_id']
+                                                              as String?,
+                                                      decoration:
+                                                          const InputDecoration(
+                                                            labelText: 'Barang',
+                                                          ),
+                                                      items: SyncService
+                                                          .instance
+                                                          .daftarBarang
+                                                          .value
+                                                          .map(
+                                                            (b) =>
+                                                                DropdownMenuItem<
+                                                                  String
+                                                                >(
+                                                                  value: b['id']
+                                                                      .toString(),
+                                                                  child: Text(
+                                                                    b['nama']
+                                                                            ?.toString() ??
+                                                                        '-',
+                                                                  ),
                                                                 ),
-                                                              ),
-                                                        )
-                                                        .toList(),
-                                                    onChanged: (val) =>
-                                                        setModal(
-                                                          () =>
-                                                              row['barang_id'] =
-                                                                  val,
-                                                        ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  flex: 2,
-                                                  child: TextField(
-                                                    controller:
-                                                        row['qty']
-                                                            as TextEditingController,
-                                                    keyboardType:
-                                                        TextInputType.number,
-                                                    decoration:
-                                                        const InputDecoration(
-                                                          labelText: 'Qty',
-                                                        ),
-                                                  ),
-                                                ),
-                                                if (kunjunganEdit.length > 1)
-                                                  IconButton(
-                                                    onPressed: () => setModal(
-                                                      () => kunjunganEdit
-                                                          .removeAt(i),
-                                                    ),
-                                                    icon: const Icon(
-                                                      Icons.delete_outline,
-                                                      color: Colors.redAccent,
+                                                          )
+                                                          .toList(),
+                                                      onChanged: (val) =>
+                                                          setModal(
+                                                            () =>
+                                                                row['barang_id'] =
+                                                                    val,
+                                                          ),
                                                     ),
                                                   ),
-                                              ],
-                                            ),
-                                          );
-                                        }),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: TextButton.icon(
-                                            onPressed: () => setModal(
-                                              () => kunjunganEdit.add({
-                                                'id': null,
-                                                'klien_id': null,
-                                                'barang_id': null,
-                                                'qty': TextEditingController(),
-                                              }),
-                                            ),
-                                            icon: const Icon(Icons.add),
-                                            label: const Text(
-                                              'Tambah klien lain',
-                                            ),
-                                          ),
-                                        ),
-
-                                        // --- MUATAN KENDARAAN ---
-                                        const SizedBox(height: 24),
-                                        const Text(
-                                          'Muatan Kendaraan',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        ...muatanEdit.asMap().entries.map((
-                                          entry,
-                                        ) {
-                                          final i = entry.key;
-                                          final row = entry.value;
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Expanded(
-                                                  flex: 5,
-                                                  child: DropdownButtonFormField<String>(
-                                                    value:
-                                                        row['barang_id']
-                                                            as String?,
-                                                    decoration: InputDecoration(
-                                                      labelText:
-                                                          'Barang Muatan ${i + 1}',
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    flex: 2,
+                                                    child: TextField(
+                                                      controller:
+                                                          row['qty']
+                                                              as TextEditingController,
+                                                      keyboardType:
+                                                          TextInputType.number,
+                                                      decoration:
+                                                          const InputDecoration(
+                                                            labelText: 'Qty',
+                                                          ),
                                                     ),
-                                                    items: SyncService
-                                                        .instance
-                                                        .daftarBarang
-                                                        .value
-                                                        .map(
-                                                          (b) =>
-                                                              DropdownMenuItem<
-                                                                String
-                                                              >(
-                                                                value: b['id']
-                                                                    .toString(),
-                                                                child: Text(
-                                                                  '${b['nama']} (Stok: ${b['stok_gudang']})',
-                                                                ),
-                                                              ),
-                                                        )
-                                                        .toList(),
-                                                    onChanged: (val) =>
-                                                        setModal(
-                                                          () =>
-                                                              row['barang_id'] =
-                                                                  val,
-                                                        ),
                                                   ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  flex: 2,
-                                                  child: TextField(
-                                                    controller:
-                                                        row['qty']
-                                                            as TextEditingController,
-                                                    keyboardType:
-                                                        TextInputType.number,
-                                                    decoration:
-                                                        const InputDecoration(
-                                                          labelText:
-                                                              'Qty Dibawa',
-                                                        ),
-                                                  ),
-                                                ),
-                                                if (muatanEdit.length > 1)
-                                                  IconButton(
-                                                    onPressed: () => setModal(
-                                                      () => muatanEdit.removeAt(
-                                                        i,
+                                                  if (kunjunganEdit.length > 1)
+                                                    IconButton(
+                                                      onPressed: () => setModal(
+                                                        () => kunjunganEdit
+                                                            .removeAt(i),
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons.delete_outline,
+                                                        color: Colors.redAccent,
                                                       ),
                                                     ),
-                                                    icon: const Icon(
-                                                      Icons.delete_outline,
-                                                      color: Colors.redAccent,
+                                                ],
+                                              ),
+                                            );
+                                          }),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TextButton.icon(
+                                              onPressed: () => setModal(
+                                                () => kunjunganEdit.add({
+                                                  'id': null,
+                                                  'klien_id': null,
+                                                  'barang_id': null,
+                                                  'qty':
+                                                      TextEditingController(),
+                                                }),
+                                              ),
+                                              icon: const Icon(Icons.add),
+                                              label: const Text(
+                                                'Tambah klien lain',
+                                              ),
+                                            ),
+                                          ),
+
+                                          // --- MUATAN KENDARAAN ---
+                                          const SizedBox(height: 24),
+                                          const Text(
+                                            'Muatan Kendaraan',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ...muatanEdit.asMap().entries.map((
+                                            entry,
+                                          ) {
+                                            final i = entry.key;
+                                            final row = entry.value;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    flex: 5,
+                                                    child: DropdownButtonFormField<String>(
+                                                      value:
+                                                          row['barang_id']
+                                                              as String?,
+                                                      decoration: InputDecoration(
+                                                        labelText:
+                                                            'Barang Muatan ${i + 1}',
+                                                      ),
+                                                      items: SyncService
+                                                          .instance
+                                                          .daftarBarang
+                                                          .value
+                                                          .map(
+                                                            (b) =>
+                                                                DropdownMenuItem<
+                                                                  String
+                                                                >(
+                                                                  value: b['id']
+                                                                      .toString(),
+                                                                  child: Text(
+                                                                    '${b['nama']} (Stok: ${b['stok_gudang']})',
+                                                                  ),
+                                                                ),
+                                                          )
+                                                          .toList(),
+                                                      onChanged: (val) =>
+                                                          setModal(
+                                                            () =>
+                                                                row['barang_id'] =
+                                                                    val,
+                                                          ),
                                                     ),
                                                   ),
-                                              ],
-                                            ),
-                                          );
-                                        }),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: TextButton.icon(
-                                            onPressed: () => setModal(
-                                              () => muatanEdit.add({
-                                                'id': null,
-                                                'barang_id': null,
-                                                'qty': TextEditingController(),
-                                                'old_qty': 0,
-                                              }),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.local_shipping,
-                                            ),
-                                            label: const Text(
-                                              'Tambah barang muatan',
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    flex: 2,
+                                                    child: TextField(
+                                                      controller:
+                                                          row['qty']
+                                                              as TextEditingController,
+                                                      keyboardType:
+                                                          TextInputType.number,
+                                                      decoration:
+                                                          const InputDecoration(
+                                                            labelText:
+                                                                'Qty Dibawa',
+                                                          ),
+                                                    ),
+                                                  ),
+                                                  if (muatanEdit.length > 1)
+                                                    IconButton(
+                                                      onPressed: () => setModal(
+                                                        () => muatanEdit
+                                                            .removeAt(i),
+                                                      ),
+                                                      icon: const Icon(
+                                                        Icons.delete_outline,
+                                                        color: Colors.redAccent,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            );
+                                          }),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TextButton.icon(
+                                              onPressed: () => setModal(
+                                                () => muatanEdit.add({
+                                                  'id': null,
+                                                  'barang_id': null,
+                                                  'qty':
+                                                      TextEditingController(),
+                                                  'old_qty': 0,
+                                                }),
+                                              ),
+                                              icon: const Icon(
+                                                Icons.local_shipping,
+                                              ),
+                                              label: const Text(
+                                                'Tambah barang muatan',
+                                              ),
                                             ),
                                           ),
-                                        ),
 
-                                        const SizedBox(height: 32),
+                                          const SizedBox(height: 32),
 
-                                        // --- SAVE BUTTON ---
-                                        FilledButton(
-                                          style: FilledButton.styleFrom(
-                                            padding: const EdgeInsets.all(16),
+                                          // --- SAVE BUTTON ---
+                                          FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              padding: const EdgeInsets.all(16),
+                                            ),
+                                            onPressed: () async {
+                                              await SyncService.instance
+                                                  .mutateData(
+                                                    'tugas',
+                                                    'update',
+                                                    {
+                                                      'id': tugas['id'],
+                                                      'nama_tugas':
+                                                          ctrlNamaTugas.text
+                                                              .trim(),
+                                                      'modal_awal':
+                                                          double.tryParse(
+                                                            ctrlModalAwal.text,
+                                                          ) ??
+                                                          0,
+                                                      'karyawan_id':
+                                                          selectedKaryawanId,
+                                                    },
+                                                  );
+
+                                              List<String> currentKunjunganIds =
+                                                  kunjunganEdit
+                                                      .where(
+                                                        (e) => e['id'] != null,
+                                                      )
+                                                      .map(
+                                                        (e) =>
+                                                            e['id'].toString(),
+                                                      )
+                                                      .toList();
+                                              for (var raw in kunjunganRaw) {
+                                                if (!currentKunjunganIds
+                                                    .contains(raw['id'])) {
+                                                  final rawItemId =
+                                                      semuaTugasItem.firstWhere(
+                                                        (ti) =>
+                                                            ti['kunjungan_id'] ==
+                                                            raw['id'],
+                                                        orElse: () =>
+                                                            <String, dynamic>{},
+                                                      )['id'];
+                                                  if (rawItemId != null)
+                                                    await SyncService.instance
+                                                        .mutateData(
+                                                          'tugas_item',
+                                                          'delete',
+                                                          {'id': rawItemId},
+                                                        );
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'tugas_kunjungan',
+                                                        'delete',
+                                                        {'id': raw['id']},
+                                                      );
+                                                }
+                                              }
+
+                                              for (var row in kunjunganEdit) {
+                                                if (row['klien_id'] == null ||
+                                                    row['barang_id'] == null)
+                                                  continue;
+                                                final qty =
+                                                    int.tryParse(
+                                                      row['qty'].text,
+                                                    ) ??
+                                                    0;
+                                                final barang = SyncService
+                                                    .instance
+                                                    .daftarBarang
+                                                    .value
+                                                    .firstWhere(
+                                                      (b) =>
+                                                          b['id'] ==
+                                                          row['barang_id'],
+                                                      orElse: () =>
+                                                          <String, dynamic>{},
+                                                    );
+                                                final hargaTotal =
+                                                    (double.tryParse(
+                                                          '${barang['harga_satuan'] ?? 0}',
+                                                        ) ??
+                                                        0) *
+                                                    qty;
+
+                                                if (row['id'] == null) {
+                                                  final newKunjunganId =
+                                                      SyncService.instance
+                                                          .generateId();
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'tugas_kunjungan',
+                                                        'insert',
+                                                        {
+                                                          'id': newKunjunganId,
+                                                          'tugas_id':
+                                                              tugas['id'],
+                                                          'klien_id':
+                                                              row['klien_id'],
+                                                          'status': 'pending',
+                                                          'total_dibayar': 0,
+                                                        },
+                                                      );
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'tugas_item',
+                                                        'insert',
+                                                        {
+                                                          'id': SyncService
+                                                              .instance
+                                                              .generateId(),
+                                                          'kunjungan_id':
+                                                              newKunjunganId,
+                                                          'barang_id':
+                                                              row['barang_id'],
+                                                          'qty_diminta': qty,
+                                                          'qty_dikirim': 0,
+                                                          'harga_total':
+                                                              hargaTotal,
+                                                        },
+                                                      );
+                                                } else {
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'tugas_kunjungan',
+                                                        'update',
+                                                        {
+                                                          'id': row['id'],
+                                                          'klien_id':
+                                                              row['klien_id'],
+                                                        },
+                                                      );
+                                                  if (row['tugas_item_id'] !=
+                                                      null) {
+                                                    await SyncService.instance
+                                                        .mutateData(
+                                                          'tugas_item',
+                                                          'update',
+                                                          {
+                                                            'id':
+                                                                row['tugas_item_id'],
+                                                            'barang_id':
+                                                                row['barang_id'],
+                                                            'qty_diminta': qty,
+                                                            'harga_total':
+                                                                hargaTotal,
+                                                          },
+                                                        );
+                                                  }
+                                                }
+                                              }
+
+                                              List<String> currentMuatanIds =
+                                                  muatanEdit
+                                                      .where(
+                                                        (e) => e['id'] != null,
+                                                      )
+                                                      .map(
+                                                        (e) =>
+                                                            e['id'].toString(),
+                                                      )
+                                                      .toList();
+                                              for (var raw in muatanRaw) {
+                                                if (!currentMuatanIds.contains(
+                                                  raw['id'],
+                                                )) {
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'muatan_tugas',
+                                                        'delete',
+                                                        {'id': raw['id']},
+                                                      );
+                                                }
+                                              }
+                                              for (var row in muatanEdit) {
+                                                if (row['barang_id'] == null)
+                                                  continue;
+                                                final qty =
+                                                    int.tryParse(
+                                                      row['qty'].text,
+                                                    ) ??
+                                                    0;
+
+                                                if (row['id'] == null) {
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'muatan_tugas',
+                                                        'insert',
+                                                        {
+                                                          'id': SyncService
+                                                              .instance
+                                                              .generateId(),
+                                                          'tugas_id':
+                                                              tugas['id'],
+                                                          'barang_id':
+                                                              row['barang_id'],
+                                                          'qty_bawa': qty,
+                                                          'qty_sisa': 0,
+                                                        },
+                                                      );
+                                                } else {
+                                                  await SyncService.instance
+                                                      .mutateData(
+                                                        'muatan_tugas',
+                                                        'update',
+                                                        {
+                                                          'id': row['id'],
+                                                          'barang_id':
+                                                              row['barang_id'],
+                                                          'qty_bawa': qty,
+                                                        },
+                                                      );
+                                                }
+                                              }
+
+                                              if (context.mounted) {
+                                                Navigator.pop(context);
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Tugas berhasil diperbarui!',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            child: const Text(
+                                              'Simpan Perubahan',
+                                            ),
                                           ),
-                                          onPressed: () async {
-                                            // (LOGIKA SIMPAN TETAP SAMA SEPERTI SEBELUMNYA)
-                                            // ...
-                                          },
-                                          child: const Text('Simpan Perubahan'),
-                                        ),
+                                        ],
                                       ],
                                     ),
                                   ),
@@ -537,6 +913,55 @@ class _AdminScreenState extends State<AdminScreen>
           },
         );
       },
+    );
+  }
+
+  Widget _buildCompletedTugasInfo(Map<String, dynamic> tugas) {
+    final kunjungan = SyncService.instance.daftarTugasKunjungan.value
+        .where((k) => k['tugas_id'] == tugas['id'])
+        .toList();
+    final kunjunganIds = kunjungan.map((e) => e['id']).toSet();
+    final items = SyncService.instance.daftarTugasItem.value
+        .where((ti) => kunjunganIds.contains(ti['kunjungan_id']))
+        .toList();
+    final totalDiminta = items.fold<int>(
+      0,
+      (sum, item) => sum + (int.tryParse('${item['qty_diminta'] ?? 0}') ?? 0),
+    );
+    final totalDikirim = items.fold<int>(
+      0,
+      (sum, item) => sum + (int.tryParse('${item['qty_dikirim'] ?? 0}') ?? 0),
+    );
+    final alasan = kunjungan
+        .map((k) => k['catatan']?.toString().trim() ?? '')
+        .where((text) => text.isNotEmpty)
+        .toList();
+
+    return Card(
+      color: Colors.blue.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Status: ${(tugas['status'] ?? tugas['status_tugas'] ?? '-').toString().toUpperCase()}',
+            ),
+            const SizedBox(height: 8),
+            Text('Total Requested: $totalDiminta'),
+            Text('Total Delivered: $totalDikirim'),
+            if (alasan.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Alasan/Catatan:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              ...alasan.map((a) => Text('• $a')),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -1290,12 +1715,10 @@ class _AdminScreenState extends State<AdminScreen>
                               if (qty <= 0 ||
                                   (stokByBarang[barangId] ?? 0) < qty) {
                                 if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Qty muatan melebihi stok gudang atau tidak valid.',
-                                    ),
-                                  ),
+                                AppSnackbar.show(
+                                  context,
+                                  'Qty muatan melebihi stok gudang atau tidak valid.',
+                                  type: AppSnackbarType.error,
                                 );
                                 return;
                               }
@@ -1426,20 +1849,40 @@ class _AdminScreenState extends State<AdminScreen>
             return Card(
               margin: EdgeInsets.zero,
               child: ListTile(
-                onTap: () => _editBarang(item),
+                onTap: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  if (_isSelectingGudang) {
+                    _toggleGudangSelection(itemId);
+                    return;
+                  }
+                  _editBarang(item);
+                },
+                onLongPress: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  _toggleGudangSelection(itemId);
+                },
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                leading: CircleAvatar(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.inventory_2,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
+                leading: _isSelectingGudang
+                    ? Checkbox(
+                        value: _isItemSelected(item['id']?.toString() ?? ''),
+                        onChanged: (_) => _toggleGudangSelection(
+                          item['id']?.toString() ?? '',
+                        ),
+                      )
+                    : CircleAvatar(
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.primaryContainer,
+                        child: Icon(
+                          Icons.inventory_2,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
                 title: Text(
                   item['nama']?.toString() ?? '-',
                   style: const TextStyle(fontWeight: FontWeight.bold),
@@ -1451,26 +1894,28 @@ class _AdminScreenState extends State<AdminScreen>
                     style: const TextStyle(height: 1.4),
                   ),
                 ),
-                trailing: Wrap(
-                  spacing: 4,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _editBarang(item),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        color: Colors.redAccent,
+                trailing: _isSelectingGudang
+                    ? null
+                    : Wrap(
+                        spacing: 4,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => _editBarang(item),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.redAccent,
+                            ),
+                            onPressed: () => SyncService.instance.mutateData(
+                              'barang',
+                              'delete',
+                              {'id': item['id']},
+                            ),
+                          ),
+                        ],
                       ),
-                      onPressed: () => SyncService.instance.mutateData(
-                        'barang',
-                        'delete',
-                        {'id': item['id']},
-                      ),
-                    ),
-                  ],
-                ),
                 isThreeLine: true,
               ),
             );
@@ -1508,7 +1953,20 @@ class _AdminScreenState extends State<AdminScreen>
               clipBehavior:
                   Clip.antiAlias, // Required for InkWell splash effect
               child: InkWell(
-                onTap: () => _showTugasDetail(item), // Open the detail drawer
+                onTap: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  if (_isSelectingTugas) {
+                    _toggleTugasSelection(itemId);
+                    return;
+                  }
+                  _showTugasDetail(item);
+                }, // Open the detail drawer
+                onLongPress: () {
+                  final itemId = item['id']?.toString();
+                  if (itemId == null) return;
+                  _toggleTugasSelection(itemId);
+                },
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
@@ -1517,6 +1975,18 @@ class _AdminScreenState extends State<AdminScreen>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          if (_isSelectingTugas)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Checkbox(
+                                value: _isItemSelected(
+                                  item['id']?.toString() ?? '',
+                                ),
+                                onChanged: (_) => _toggleTugasSelection(
+                                  item['id']?.toString() ?? '',
+                                ),
+                              ),
+                            ),
                           Expanded(
                             child: Text(
                               item['nama_tugas']?.toString() ?? '-',
@@ -1666,58 +2136,83 @@ class _AdminScreenState extends State<AdminScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Admin Dashboard',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          _isSelectionMode
+              ? '${_tabController.index == 0 ? _selectedGudangIds.length : _selectedTugasIds.length} dipilih'
+              : 'Admin Dashboard',
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        actions: [
-          Tooltip(
-            message: 'Sinkronisasi Data',
-            child: IconButton(
-              icon: const Icon(Icons.sync),
-              onPressed: () async {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Menyinkronkan data ke server...'),
+        leading: _isSelectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  setState(() {
+                    _selectedGudangIds.clear();
+                    _selectedTugasIds.clear();
+                  });
+                },
+              )
+            : null,
+        actions: _isSelectionMode
+            ? [
+                IconButton(
+                  tooltip: 'Pilih semua',
+                  icon: const Icon(Icons.select_all),
+                  onPressed: _toggleSelectAll,
+                ),
+                IconButton(
+                  tooltip: 'Hapus terpilih',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _confirmDeleteSelected,
+                ),
+                const SizedBox(width: 8),
+              ]
+            : [
+                Tooltip(
+                  message: 'Sinkronisasi Data',
+                  child: IconButton(
+                    icon: const Icon(Icons.sync),
+                    onPressed: () async {
+                      AppSnackbar.show(
+                        context,
+                        'Menyinkronkan data ke server...',
+                        type: AppSnackbarType.info,
+                      );
+                      try {
+                        // Call your sync method here
+                        // await SyncService.instance.sync();
+
+                        // Simulating a delay for the UI feel (remove this in production)
+                        await Future.delayed(const Duration(seconds: 1));
+
+                        if (context.mounted) {
+                          AppSnackbar.show(
+                            context,
+                            'Sinkronisasi selesai!',
+                            type: AppSnackbarType.success,
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          AppSnackbar.show(
+                            context,
+                            'Gagal sinkron: $e',
+                            type: AppSnackbarType.error,
+                          );
+                        }
+                      }
+                    },
                   ),
-                );
-                try {
-                  // Call your sync method here
-                  // await SyncService.instance.sync();
-
-                  // Simulating a delay for the UI feel (remove this in production)
-                  await Future.delayed(const Duration(seconds: 1));
-
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Sinkronisasi selesai!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Gagal sinkron: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-            ),
-          ),
-          Tooltip(
-            message: 'Switch to Driver App',
-            child: IconButton(
-              icon: const Icon(Icons.swap_horiz),
-              onPressed: widget.onToggleDashboard,
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
+                ),
+                Tooltip(
+                  message: 'Switch to Driver App',
+                  child: IconButton(
+                    icon: const Icon(Icons.swap_horiz),
+                    onPressed: widget.onToggleDashboard,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
         bottom: TabBar(
           controller: _tabController,
           labelStyle: const TextStyle(fontWeight: FontWeight.bold),
@@ -1736,6 +2231,9 @@ class _AdminScreenState extends State<AdminScreen>
       floatingActionButton: AnimatedBuilder(
         animation: _tabController,
         builder: (context, _) {
+          if (_isSelectionMode) {
+            return const SizedBox.shrink();
+          }
           if (_tabController.index == 0) {
             return FloatingActionButton.extended(
               onPressed: _buatBarang,
@@ -1760,11 +2258,15 @@ class _AdminScreenState extends State<AdminScreen>
 class BouncingExpandArrow extends StatefulWidget {
   final VoidCallback onTap;
   final bool isExpanded; // Tambahkan properti ini
+  final String collapsedLabel;
+  final String expandedLabel;
 
   const BouncingExpandArrow({
     super.key,
     required this.onTap,
     this.isExpanded = false, // Default false
+    this.collapsedLabel = 'Ketuk untuk Edit Detail Tugas',
+    this.expandedLabel = 'Tutup Form Edit',
   });
 
   @override
@@ -1800,10 +2302,7 @@ class _BouncingExpandArrowState extends State<BouncingExpandArrow>
         child: Column(
           children: [
             Text(
-              // Teks berubah sesuai status accordion
-              widget.isExpanded
-                  ? 'Tutup Form Edit'
-                  : 'Ketuk untuk Edit Detail Tugas',
+              widget.isExpanded ? widget.expandedLabel : widget.collapsedLabel,
               style: const TextStyle(
                 color: Colors.blue,
                 fontWeight: FontWeight.bold,

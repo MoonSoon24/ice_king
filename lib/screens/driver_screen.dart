@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/sync_service.dart';
+import '../widgets/app_snackbar.dart';
 
 // ==========================================
 // 1. LAYAR UTAMA DRIVER (DAFTAR TUGAS INDUK)
@@ -66,7 +67,9 @@ class DriverScreen extends StatelessWidget {
               separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final tugas = tugasList[index];
-                final status = (tugas['status'] ?? 'pending').toString();
+                final status =
+                    (tugas['status'] ?? tugas['status_tugas'] ?? 'pending')
+                        .toString();
                 final isCompleted = status == 'completed';
 
                 // Hitung jumlah tujuan untuk UI
@@ -160,12 +163,24 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   List<Map<String, dynamic>> _kunjunganList = [];
   bool _isPending = true;
   bool _isLoading = false; // State baru untuk efek loading transisi
+  Map<String, dynamic>? _lastFinishedKunjungan;
 
   // Controllers untuk input form aktif
   final Map<String, TextEditingController> _qtyCtrls = {};
   final TextEditingController _tunaiCtrl = TextEditingController();
   String _metode = 'transfer';
   String? _activeKunjunganId;
+
+  String _statusTugas() =>
+      (widget.tugas['status'] ?? widget.tugas['status_tugas'] ?? 'pending')
+          .toString();
+
+  void _showPrettySnackbar(
+    String message, {
+    AppSnackbarType type = AppSnackbarType.info,
+  }) {
+    AppSnackbar.show(context, message, type: type);
+  }
 
   @override
   void initState() {
@@ -174,7 +189,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   }
 
   void _loadData() {
-    final statusTugas = (widget.tugas['status'] ?? 'pending').toString();
+    final statusTugas = _statusTugas();
     _isPending = statusTugas == 'pending';
 
     final raw = SyncService.instance.daftarTugasKunjungan.value
@@ -214,6 +229,18 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   }
 
   Future<void> _mulaiTugas() async {
+    final tugasLainBerjalan = SyncService.instance.daftarTugas.value.any(
+      (t) =>
+          t['id'] != widget.tugas['id'] &&
+          ((t['status'] ?? t['status_tugas']) == 'in_progress'),
+    );
+    if (tugasLainBerjalan) {
+      _showPrettySnackbar(
+        'Masih ada tugas lain yang sedang berjalan. Selesaikan dulu sebelum memulai tugas baru.',
+        type: AppSnackbarType.warning,
+      );
+      return;
+    }
     // 1. Munculkan Layar Putih (Animasi Fade In)
     setState(() {
       _isLoading = true;
@@ -224,7 +251,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
         'id': _kunjunganList[i]['id'],
         'urutan': i,
-      });
+      }, showSnackbar: false);
     }
 
     // 3. Ubah Status Tugas Utama di Database
@@ -252,18 +279,27 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   Future<void> _selesaikanKunjunganSaatIni(
     Map<String, dynamic> activeKunjungan,
     List<Map<String, dynamic>> items,
+    String? catatanTambahan,
+    bool lanjutKeKlienBerikutnya,
   ) async {
     final Map<String, int> qtyPerBarang = {};
+    final perubahanQty = <String>[];
     for (final item in items) {
       final qty = int.tryParse(_qtyCtrls[item['id']]!.text) ?? 0;
+      final qtyDiminta = int.tryParse('${item['qty_diminta'] ?? 0}') ?? 0;
       final barangId = item['barang_id'];
       if (barangId != null)
         qtyPerBarang[barangId] = (qtyPerBarang[barangId] ?? 0) + qty;
+      if (qty != qtyDiminta) {
+        perubahanQty.add(
+          '${item['nama_barang'] ?? 'Barang'}: diminta $qtyDiminta, dikirim $qty',
+        );
+      }
 
       await SyncService.instance.mutateData('tugas_item', 'update', {
         'id': item['id'],
         'qty_dikirim': qty,
-      });
+      }, showSnackbar: false);
     }
 
     // Deduct Muatan Kendaraan
@@ -280,31 +316,56 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       await SyncService.instance.mutateData('muatan_tugas', 'update', {
         'id': m['id'],
         'qty_sisa': sisaBaru,
-      });
+      }, showSnackbar: false);
     }
 
     // Update Status Kunjungan
+    final catatan = [
+      if (perubahanQty.isNotEmpty)
+        'Penyesuaian qty: ${perubahanQty.join(' | ')}',
+      if (catatanTambahan != null && catatanTambahan.trim().isNotEmpty)
+        catatanTambahan.trim(),
+    ].join('\n');
+
     await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
       'id': activeKunjungan['id'],
       'status': 'delivered',
+      'catatan': catatan.isEmpty ? null : catatan,
       'metode_bayar': _metode,
       'total_dibayar': _metode == 'cash'
           ? (double.tryParse(_tunaiCtrl.text) ?? 0)
           : 0,
-    });
+    }, showSnackbar: false);
 
-    await _cekStatusTugasSelesai();
+    _lastFinishedKunjungan = Map<String, dynamic>.from(activeKunjungan)
+      ..['status'] = 'delivered'
+      ..['catatan'] = catatan;
+    await _cekStatusTugasSelesai(
+      lanjutKeKlienBerikutnya: lanjutKeKlienBerikutnya,
+    );
   }
 
-  Future<void> _tandaiGagal(Map<String, dynamic> activeKunjungan) async {
+  Future<void> _tandaiGagal(
+    Map<String, dynamic> activeKunjungan,
+    String catatan,
+    bool lanjutKeKlienBerikutnya,
+  ) async {
     await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
       'id': activeKunjungan['id'],
       'status': 'failed',
-    });
-    await _cekStatusTugasSelesai();
+      'catatan': catatan.trim(),
+    }, showSnackbar: false);
+    _lastFinishedKunjungan = Map<String, dynamic>.from(activeKunjungan)
+      ..['status'] = 'failed'
+      ..['catatan'] = catatan;
+    await _cekStatusTugasSelesai(
+      lanjutKeKlienBerikutnya: lanjutKeKlienBerikutnya,
+    );
   }
 
-  Future<void> _cekStatusTugasSelesai() async {
+  Future<void> _cekStatusTugasSelesai({
+    required bool lanjutKeKlienBerikutnya,
+  }) async {
     final raw = SyncService.instance.daftarTugasKunjungan.value
         .where((k) => k['tugas_id'] == widget.tugas['id'])
         .toList();
@@ -316,17 +377,151 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       await SyncService.instance.mutateData('tugas', 'update', {
         'id': widget.tugas['id'],
         'status': 'completed',
-      });
+      }, showSnackbar: false);
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tugas Selesai! Kembali ke markas.')),
+        _showPrettySnackbar(
+          'Tugas selesai! Semua kunjungan sudah diproses.',
+          type: AppSnackbarType.success,
         );
       }
     } else {
       if (!mounted) return;
-      setState(() => _loadData());
+      setState(() {
+        _loadData();
+        if (!lanjutKeKlienBerikutnya) {
+          _activeKunjunganId = null;
+        }
+      });
+      _showPrettySnackbar(
+        lanjutKeKlienBerikutnya
+            ? 'Lanjut ke klien berikutnya.'
+            : 'Drop tersimpan. Anda tetap di halaman detail drop terakhir.',
+        type: AppSnackbarType.info,
+      );
     }
+  }
+
+  Future<String?> _askReasonModal({
+    required String title,
+    required String hint,
+  }) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (ctrl.text.trim().isEmpty) return;
+              Navigator.pop(context, ctrl.text.trim());
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return result;
+  }
+
+  Future<void> _onTapGagal(Map<String, dynamic> activeKunjungan) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Konfirmasi Gagal Drop'),
+        content: const Text('Yakin ingin menandai drop ini sebagai gagal?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Ya, Gagal'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    final alasan = await _askReasonModal(
+      title: 'Alasan Gagal Drop',
+      hint: 'Contoh: klien tutup, alamat tidak ditemukan, dll.',
+    );
+    if (alasan == null) return;
+
+    final lanjut = await _askContinueModal();
+    if (lanjut == null) return;
+
+    await _tandaiGagal(activeKunjungan, alasan, lanjut);
+  }
+
+  Future<bool?> _askContinueModal() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Lanjutkan Perjalanan?'),
+        content: const Text(
+          'Pilih aksi berikutnya setelah proses drop ini disimpan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Tetap di halaman ini'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Lanjut ke klien berikutnya'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _onTapSelesaiDrop(
+    Map<String, dynamic> activeKunjungan,
+    List<Map<String, dynamic>> items,
+  ) async {
+    String? catatanTambahan;
+    final adaPenyesuaianQty = items.any((item) {
+      final qtyInput = int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
+      final qtyDiminta = int.tryParse('${item['qty_diminta'] ?? 0}') ?? 0;
+      return qtyInput != qtyDiminta;
+    });
+
+    if (adaPenyesuaianQty) {
+      catatanTambahan = await _askReasonModal(
+        title: 'Alasan Perubahan Qty',
+        hint: 'Jelaskan alasan qty bertambah/berkurang.',
+      );
+      if (catatanTambahan == null) return;
+    }
+
+    final lanjut = await _askContinueModal();
+    if (lanjut == null) return;
+
+    await _selesaikanKunjunganSaatIni(
+      activeKunjungan,
+      items,
+      catatanTambahan,
+      lanjut,
+    );
   }
 
   Future<void> _bukaMaps(String alamat) async {
@@ -339,18 +534,13 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Tidak dapat membuka Google Maps.')),
-          );
-        }
+        _showPrettySnackbar(
+          'Tidak dapat membuka Google Maps.',
+          type: AppSnackbarType.error,
+        );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Terjadi kesalahan: $e')));
-      }
+      _showPrettySnackbar('Terjadi kesalahan: $e', type: AppSnackbarType.error);
     }
   }
 
@@ -469,7 +659,9 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       orElse: () => <String, dynamic>{},
     );
 
-    if (active.isEmpty) return const Center(child: Text('Memuat...'));
+    if (active.isEmpty) {
+      return _buildDetailDropTerakhir();
+    }
 
     final klien = SyncService.instance.daftarKlien.value.firstWhere(
       (k) => k['id'] == active['klien_id'],
@@ -627,7 +819,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _tandaiGagal(active),
+                  onPressed: () => _onTapGagal(active),
                   icon: const Icon(Icons.cancel, color: Colors.red),
                   label: const Text(
                     'Gagal',
@@ -643,7 +835,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
               Expanded(
                 flex: 2,
                 child: FilledButton.icon(
-                  onPressed: () => _selesaikanKunjunganSaatIni(active, items),
+                  onPressed: () => _onTapSelesaiDrop(active, items),
                   icon: const Icon(Icons.check_circle),
                   label: const Text('Selesai Drop'),
                   style: FilledButton.styleFrom(
@@ -659,13 +851,62 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     );
   }
 
+  Widget _buildDetailDropTerakhir() {
+    final selesai =
+        _lastFinishedKunjungan ??
+        _kunjunganList.lastWhere(
+          (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
+          orElse: () => <String, dynamic>{},
+        );
+    if (selesai.isEmpty) {
+      return const Center(child: Text('Tidak ada kunjungan aktif.'));
+    }
+    final status = (selesai['status_kunjungan'] ?? selesai['status'] ?? '-')
+        .toString();
+    final catatan = selesai['catatan']?.toString();
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Detail Tugas',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                Text('Klien: ${selesai['nama_klien'] ?? '-'}'),
+                Text('Status Drop: ${status.toUpperCase()}'),
+                if (catatan != null && catatan.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text('Alasan/Catatan: $catatan'),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _isLoading
           ? null
           : AppBar(
-              title: Text(_isPending ? 'Susun Rute Anda' : 'Tugas Berjalan'),
+              title: Text(
+                _isPending
+                    ? 'Susun Rute Anda'
+                    : (_statusTugas() == 'completed'
+                          ? 'Detail Tugas'
+                          : 'Tugas Berjalan'),
+              ),
               backgroundColor: Colors.white,
               foregroundColor: Colors.black,
               elevation: 1,
