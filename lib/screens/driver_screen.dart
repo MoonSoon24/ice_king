@@ -841,7 +841,6 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           ),
           const SizedBox(height: 12),
           ..._kunjunganList.map((k) {
-            final kunjunganId = k['id'];
             final items = SyncService.instance.daftarTugasItem.value
                 .where((ti) => ti['kunjungan_id'] == k['id'])
                 .toList();

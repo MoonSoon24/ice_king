@@ -127,7 +127,6 @@ class _AdminScreenState extends State<AdminScreen>
     }
 
     if (_tabController.index == 2) {
-      // TAMBAHAN UNTUK KLIEN
       final ids = SyncService.instance.daftarKlien.value
           .map((e) => e['id']?.toString())
           .whereType<String>()
@@ -196,7 +195,7 @@ class _AdminScreenState extends State<AdminScreen>
     setState(() {
       _selectedGudangIds.clear();
       _selectedTugasIds.clear();
-      _selectedKlienIds.clear(); // TAMBAHAN UNTUK KLIEN
+      _selectedKlienIds.clear();
     });
     AppSnackbar.show(
       context,
@@ -2106,11 +2105,46 @@ class _AdminScreenState extends State<AdminScreen>
                               Icons.delete_outline,
                               color: Colors.redAccent,
                             ),
-                            onPressed: () => SyncService.instance.mutateData(
-                              'barang',
-                              'delete',
-                              {'id': item['id']},
-                            ),
+                            onPressed: () async {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (context) {
+                                  return AlertDialog(
+                                    title: const Text('Konfirmasi Hapus'),
+                                    content: Text(
+                                      'Yakin ingin menghapus barang "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(
+                                          context,
+                                          false,
+                                        ), // Batal
+                                        child: const Text('Batal'),
+                                      ),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: Colors.redAccent,
+                                        ),
+                                        onPressed: () => Navigator.pop(
+                                          context,
+                                          true,
+                                        ), // Konfirmasi
+                                        child: const Text('Hapus'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+
+                              if (confirmed == true) {
+                                SyncService.instance.mutateData(
+                                  'barang',
+                                  'delete',
+                                  {'id': item['id']},
+                                );
+                              }
+                            },
                           ),
                         ],
                       ),
@@ -2319,11 +2353,46 @@ class _AdminScreenState extends State<AdminScreen>
                               Icons.delete_outline,
                               color: Colors.redAccent,
                             ),
-                            onPressed: () => SyncService.instance.mutateData(
-                              'klien',
-                              'delete',
-                              {'id': item['id']},
-                            ),
+                            onPressed: () async {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (context) {
+                                  return AlertDialog(
+                                    title: const Text('Konfirmasi Hapus'),
+                                    content: Text(
+                                      'Yakin ingin menghapus klien "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(
+                                          context,
+                                          false,
+                                        ), // Batal
+                                        child: const Text('Batal'),
+                                      ),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: Colors.redAccent,
+                                        ),
+                                        onPressed: () => Navigator.pop(
+                                          context,
+                                          true,
+                                        ), // Konfirmasi
+                                        child: const Text('Hapus'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+
+                              if (confirmed == true) {
+                                SyncService.instance.mutateData(
+                                  'klien',
+                                  'delete',
+                                  {'id': item['id']},
+                                );
+                              }
+                            },
                           ),
                         ],
                       ),
@@ -2433,7 +2502,7 @@ class _AdminScreenState extends State<AdminScreen>
           tabs: const [
             Tab(icon: Icon(Icons.inventory_2), text: 'Gudang'),
             Tab(icon: Icon(Icons.assignment), text: 'Tugas'),
-            Tab(icon: Icon(Icons.business), text: 'Klien'), // UPDATED
+            Tab(icon: Icon(Icons.business), text: 'Klien'),
           ],
         ),
       ),
