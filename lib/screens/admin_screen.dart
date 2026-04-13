@@ -31,7 +31,6 @@ class _AdminScreenState extends State<AdminScreen>
   void _showTugasDetail(Map<String, dynamic> tugas) {
     final statusTugas = (tugas['status'] ?? tugas['status_tugas'] ?? 'pending')
         .toString();
-    final isPending = statusTugas == 'pending';
 
     // 1. AMBIL DATA SAAT INI DARI CACHE
     List<Map<String, dynamic>> kunjunganRaw = [];
@@ -155,37 +154,6 @@ class _AdminScreenState extends State<AdminScreen>
                       ),
                       const SizedBox(height: 24),
 
-                      // --- STATUS & TIMELINE ---
-                      if (!isPending)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 24),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.shade200),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.lock_outline,
-                                color: Colors.orange.shade800,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Tugas sudah berjalan. Perubahan dikunci.',
-                                  style: TextStyle(
-                                    color: Colors.orange.shade800,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
                       const Text(
                         'Progress Perjalanan',
                         style: TextStyle(
@@ -196,413 +164,389 @@ class _AdminScreenState extends State<AdminScreen>
                       const SizedBox(height: 16),
                       _buildTrackingTimeline(kunjunganRaw),
 
-                      // --- INDIKATOR ANIMASI (HANYA MUNCUL JIKA PENDING) ---
-                      if (isPending) ...[
-                        BouncingExpandArrow(
-                          onTap: () {
-                            // Animasi otomatis expand ke 95% layar jika indikator di-tap
-                            sheetController.animateTo(
-                              0.95,
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeOutCubic,
-                            );
-                          },
-                        ),
-
-                        const Divider(thickness: 2),
-                        const SizedBox(height: 16),
-
-                        // --- FORM EDIT ---
-                        const Text(
-                          'Edit Detail Tugas',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.blue,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        TextField(
-                          controller: ctrlNamaTugas,
-                          decoration: const InputDecoration(
-                            labelText: 'Nama tugas',
-                            prefixIcon: Icon(Icons.task_alt),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        TextField(
-                          controller: ctrlModalAwal,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Modal Awal',
-                            prefixIcon: Icon(Icons.attach_money),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        DropdownButtonFormField<String>(
-                          value: selectedKaryawanId,
-                          decoration: const InputDecoration(
-                            labelText: 'Pengantar (Driver)',
-                            prefixIcon: Icon(Icons.person),
-                          ),
-                          items: SyncService.instance.daftarKaryawan.value
-                              .map(
-                                (k) => DropdownMenuItem<String>(
-                                  value: k['id'].toString(),
-                                  child: Text(k['nama']?.toString() ?? '-'),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (val) =>
-                              setModal(() => selectedKaryawanId = val),
-                        ),
-
-                        // --- KLIEN & PERMINTAAN ---
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Daftar Klien & Permintaan',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 12),
-                        ...kunjunganEdit.asMap().entries.map((entry) {
-                          final i = entry.key;
-                          final row = entry.value;
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: DropdownButtonFormField<String>(
-                                    value: row['klien_id'] as String?,
-                                    decoration: InputDecoration(
-                                      labelText: 'Klien ${i + 1}',
-                                    ),
-                                    items: SyncService
-                                        .instance
-                                        .daftarKlien
-                                        .value
-                                        .map(
-                                          (k) => DropdownMenuItem<String>(
-                                            value: k['id'].toString(),
-                                            child: Text(
-                                              k['nama']?.toString() ?? '-',
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (val) =>
-                                        setModal(() => row['klien_id'] = val),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 3,
-                                  child: DropdownButtonFormField<String>(
-                                    value: row['barang_id'] as String?,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Barang',
-                                    ),
-                                    items: SyncService
-                                        .instance
-                                        .daftarBarang
-                                        .value
-                                        .map(
-                                          (b) => DropdownMenuItem<String>(
-                                            value: b['id'].toString(),
-                                            child: Text(
-                                              b['nama']?.toString() ?? '-',
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (val) =>
-                                        setModal(() => row['barang_id'] = val),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    controller:
-                                        row['qty'] as TextEditingController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Qty',
-                                    ),
-                                  ),
-                                ),
-                                if (kunjunganEdit.length > 1)
-                                  IconButton(
-                                    onPressed: () => setModal(
-                                      () => kunjunganEdit.removeAt(i),
-                                    ),
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      color: Colors.redAccent,
-                                    ),
-                                  ),
-                              ],
-                            ),
+                      BouncingExpandArrow(
+                        onTap: () {
+                          // Animasi otomatis expand ke 95% layar jika indikator di-tap
+                          sheetController.animateTo(
+                            0.95,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOutCubic,
                           );
-                        }),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: () => setModal(
-                              () => kunjunganEdit.add({
-                                'id': null,
-                                'klien_id': null,
-                                'barang_id': null,
-                                'qty': TextEditingController(),
-                              }),
-                            ),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Tambah klien lain'),
-                          ),
-                        ),
+                        },
+                      ),
 
-                        // --- MUATAN KENDARAAN ---
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Muatan Kendaraan',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                      const Divider(thickness: 2),
+                      const SizedBox(height: 16),
+
+                      // --- FORM EDIT ---
+                      const Text(
+                        'Edit Detail Tugas',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: Colors.blue,
                         ),
-                        const SizedBox(height: 12),
-                        ...muatanEdit.asMap().entries.map((entry) {
-                          final i = entry.key;
-                          final row = entry.value;
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 5,
-                                  child: DropdownButtonFormField<String>(
-                                    value: row['barang_id'] as String?,
-                                    decoration: InputDecoration(
-                                      labelText: 'Barang Muatan ${i + 1}',
-                                    ),
-                                    items: SyncService
-                                        .instance
-                                        .daftarBarang
-                                        .value
-                                        .map(
-                                          (b) => DropdownMenuItem<String>(
-                                            value: b['id'].toString(),
-                                            child: Text(
-                                              '${b['nama']} (Stok: ${b['stok_gudang']})',
-                                            ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      TextField(
+                        controller: ctrlNamaTugas,
+                        decoration: const InputDecoration(
+                          labelText: 'Nama tugas',
+                          prefixIcon: Icon(Icons.task_alt),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextField(
+                        controller: ctrlModalAwal,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Modal Awal',
+                          prefixIcon: Icon(Icons.attach_money),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      DropdownButtonFormField<String>(
+                        value: selectedKaryawanId,
+                        decoration: const InputDecoration(
+                          labelText: 'Pengantar (Driver)',
+                          prefixIcon: Icon(Icons.person),
+                        ),
+                        items: SyncService.instance.daftarKaryawan.value
+                            .map(
+                              (k) => DropdownMenuItem<String>(
+                                value: k['id'].toString(),
+                                child: Text(k['nama']?.toString() ?? '-'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (val) =>
+                            setModal(() => selectedKaryawanId = val),
+                      ),
+
+                      // --- KLIEN & PERMINTAAN ---
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Daftar Klien & Permintaan',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      ...kunjunganEdit.asMap().entries.map((entry) {
+                        final i = entry.key;
+                        final row = entry.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: DropdownButtonFormField<String>(
+                                  value: row['klien_id'] as String?,
+                                  decoration: InputDecoration(
+                                    labelText: 'Klien ${i + 1}',
+                                  ),
+                                  items: SyncService.instance.daftarKlien.value
+                                      .map(
+                                        (k) => DropdownMenuItem<String>(
+                                          value: k['id'].toString(),
+                                          child: Text(
+                                            k['nama']?.toString() ?? '-',
                                           ),
-                                        )
-                                        .toList(),
-                                    onChanged: (val) =>
-                                        setModal(() => row['barang_id'] = val),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (val) =>
+                                      setModal(() => row['klien_id'] = val),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 3,
+                                child: DropdownButtonFormField<String>(
+                                  value: row['barang_id'] as String?,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Barang',
+                                  ),
+                                  items: SyncService.instance.daftarBarang.value
+                                      .map(
+                                        (b) => DropdownMenuItem<String>(
+                                          value: b['id'].toString(),
+                                          child: Text(
+                                            b['nama']?.toString() ?? '-',
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (val) =>
+                                      setModal(() => row['barang_id'] = val),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller:
+                                      row['qty'] as TextEditingController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Qty',
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    controller:
-                                        row['qty'] as TextEditingController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Qty Dibawa',
-                                    ),
+                              ),
+                              if (kunjunganEdit.length > 1)
+                                IconButton(
+                                  onPressed: () =>
+                                      setModal(() => kunjunganEdit.removeAt(i)),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
                                   ),
                                 ),
-                                if (muatanEdit.length > 1)
-                                  IconButton(
-                                    onPressed: () =>
-                                        setModal(() => muatanEdit.removeAt(i)),
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      color: Colors.redAccent,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          );
-                        }),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: () => setModal(
-                              () => muatanEdit.add({
-                                'id': null,
-                                'barang_id': null,
-                                'qty': TextEditingController(),
-                                'old_qty': 0,
-                              }),
-                            ),
-                            icon: const Icon(Icons.local_shipping),
-                            label: const Text('Tambah barang muatan'),
+                            ],
                           ),
+                        );
+                      }),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => setModal(
+                            () => kunjunganEdit.add({
+                              'id': null,
+                              'klien_id': null,
+                              'barang_id': null,
+                              'qty': TextEditingController(),
+                            }),
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Tambah klien lain'),
                         ),
+                      ),
 
-                        const SizedBox(height: 32),
-
-                        // --- SAVE BUTTON ---
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.all(16),
-                          ),
-                          onPressed: () async {
-                            // (Logika Simpan Sama Seperti Sebelumnya)
-                            await SyncService.instance
-                                .mutateData('tugas', 'update', {
-                                  'id': tugas['id'],
-                                  'nama_tugas': ctrlNamaTugas.text.trim(),
-                                  'modal_awal':
-                                      double.tryParse(ctrlModalAwal.text) ?? 0,
-                                  'karyawan_id': selectedKaryawanId,
-                                });
-
-                            List<String> currentKunjunganIds = kunjunganEdit
-                                .where((e) => e['id'] != null)
-                                .map((e) => e['id'].toString())
-                                .toList();
-                            for (var raw in kunjunganRaw) {
-                              if (!currentKunjunganIds.contains(raw['id'])) {
-                                final rawItemId = semuaTugasItem.firstWhere(
-                                  (ti) => ti['kunjungan_id'] == raw['id'],
-                                  orElse: () => <String, dynamic>{},
-                                )['id'];
-                                if (rawItemId != null)
-                                  await SyncService.instance.mutateData(
-                                    'tugas_item',
-                                    'delete',
-                                    {'id': rawItemId},
-                                  );
-                                await SyncService.instance.mutateData(
-                                  'tugas_kunjungan',
-                                  'delete',
-                                  {'id': raw['id']},
-                                );
-                              }
-                            }
-
-                            for (var row in kunjunganEdit) {
-                              if (row['klien_id'] == null ||
-                                  row['barang_id'] == null)
-                                continue;
-                              final qty = int.tryParse(row['qty'].text) ?? 0;
-                              final barang = SyncService
-                                  .instance
-                                  .daftarBarang
-                                  .value
-                                  .firstWhere(
-                                    (b) => b['id'] == row['barang_id'],
-                                    orElse: () => <String, dynamic>{},
-                                  );
-                              final hargaTotal =
-                                  (double.tryParse(
-                                        '${barang['harga_satuan'] ?? 0}',
-                                      ) ??
-                                      0) *
-                                  qty;
-
-                              if (row['id'] == null) {
-                                final newKunjunganId = SyncService.instance
-                                    .generateId();
-                                await SyncService.instance
-                                    .mutateData('tugas_kunjungan', 'insert', {
-                                      'id': newKunjunganId,
-                                      'tugas_id': tugas['id'],
-                                      'klien_id': row['klien_id'],
-                                      'status': 'pending',
-                                      'total_dibayar': 0,
-                                    });
-                                await SyncService.instance
-                                    .mutateData('tugas_item', 'insert', {
-                                      'id': SyncService.instance.generateId(),
-                                      'kunjungan_id': newKunjunganId,
-                                      'barang_id': row['barang_id'],
-                                      'qty_diminta': qty,
-                                      'qty_dikirim': 0,
-                                      'harga_total': hargaTotal,
-                                    });
-                              } else {
-                                await SyncService.instance.mutateData(
-                                  'tugas_kunjungan',
-                                  'update',
-                                  {
-                                    'id': row['id'],
-                                    'klien_id': row['klien_id'],
-                                  },
-                                );
-                                if (row['tugas_item_id'] != null) {
-                                  await SyncService.instance
-                                      .mutateData('tugas_item', 'update', {
-                                        'id': row['tugas_item_id'],
-                                        'barang_id': row['barang_id'],
-                                        'qty_diminta': qty,
-                                        'harga_total': hargaTotal,
-                                      });
-                                }
-                              }
-                            }
-
-                            List<String> currentMuatanIds = muatanEdit
-                                .where((e) => e['id'] != null)
-                                .map((e) => e['id'].toString())
-                                .toList();
-                            for (var raw in muatanRaw) {
-                              if (!currentMuatanIds.contains(raw['id'])) {
-                                await SyncService.instance.mutateData(
-                                  'muatan_tugas',
-                                  'delete',
-                                  {'id': raw['id']},
-                                );
-                              }
-                            }
-                            for (var row in muatanEdit) {
-                              if (row['barang_id'] == null) continue;
-                              final qty = int.tryParse(row['qty'].text) ?? 0;
-
-                              if (row['id'] == null) {
-                                await SyncService.instance
-                                    .mutateData('muatan_tugas', 'insert', {
-                                      'id': SyncService.instance.generateId(),
-                                      'tugas_id': tugas['id'],
-                                      'barang_id': row['barang_id'],
-                                      'qty_bawa': qty,
-                                      'qty_sisa': 0,
-                                    });
-                              } else {
-                                await SyncService.instance
-                                    .mutateData('muatan_tugas', 'update', {
-                                      'id': row['id'],
-                                      'barang_id': row['barang_id'],
-                                      'qty_bawa': qty,
-                                    });
-                              }
-                            }
-
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Tugas berhasil diperbarui!'),
+                      // --- MUATAN KENDARAAN ---
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Muatan Kendaraan',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      ...muatanEdit.asMap().entries.map((entry) {
+                        final i = entry.key;
+                        final row = entry.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 5,
+                                child: DropdownButtonFormField<String>(
+                                  value: row['barang_id'] as String?,
+                                  decoration: InputDecoration(
+                                    labelText: 'Barang Muatan ${i + 1}',
+                                  ),
+                                  items: SyncService.instance.daftarBarang.value
+                                      .map(
+                                        (b) => DropdownMenuItem<String>(
+                                          value: b['id'].toString(),
+                                          child: Text(
+                                            '${b['nama']} (Stok: ${b['stok_gudang']})',
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (val) =>
+                                      setModal(() => row['barang_id'] = val),
                                 ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller:
+                                      row['qty'] as TextEditingController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Qty Dibawa',
+                                  ),
+                                ),
+                              ),
+                              if (muatanEdit.length > 1)
+                                IconButton(
+                                  onPressed: () =>
+                                      setModal(() => muatanEdit.removeAt(i)),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      }),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => setModal(
+                            () => muatanEdit.add({
+                              'id': null,
+                              'barang_id': null,
+                              'qty': TextEditingController(),
+                              'old_qty': 0,
+                            }),
+                          ),
+                          icon: const Icon(Icons.local_shipping),
+                          label: const Text('Tambah barang muatan'),
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // --- SAVE BUTTON ---
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        onPressed: () async {
+                          // (Logika Simpan Sama Seperti Sebelumnya)
+                          await SyncService.instance
+                              .mutateData('tugas', 'update', {
+                                'id': tugas['id'],
+                                'nama_tugas': ctrlNamaTugas.text.trim(),
+                                'modal_awal':
+                                    double.tryParse(ctrlModalAwal.text) ?? 0,
+                                'karyawan_id': selectedKaryawanId,
+                              });
+
+                          List<String> currentKunjunganIds = kunjunganEdit
+                              .where((e) => e['id'] != null)
+                              .map((e) => e['id'].toString())
+                              .toList();
+                          for (var raw in kunjunganRaw) {
+                            if (!currentKunjunganIds.contains(raw['id'])) {
+                              final rawItemId = semuaTugasItem.firstWhere(
+                                (ti) => ti['kunjungan_id'] == raw['id'],
+                                orElse: () => <String, dynamic>{},
+                              )['id'];
+                              if (rawItemId != null)
+                                await SyncService.instance.mutateData(
+                                  'tugas_item',
+                                  'delete',
+                                  {'id': rawItemId},
+                                );
+                              await SyncService.instance.mutateData(
+                                'tugas_kunjungan',
+                                'delete',
+                                {'id': raw['id']},
                               );
                             }
-                          },
-                          child: const Text('Simpan Perubahan'),
-                        ),
-                      ] else ...[
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.all(16),
-                          ),
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Tutup'),
-                        ),
-                      ],
+                          }
+
+                          for (var row in kunjunganEdit) {
+                            if (row['klien_id'] == null ||
+                                row['barang_id'] == null)
+                              continue;
+                            final qty = int.tryParse(row['qty'].text) ?? 0;
+                            final barang = SyncService
+                                .instance
+                                .daftarBarang
+                                .value
+                                .firstWhere(
+                                  (b) => b['id'] == row['barang_id'],
+                                  orElse: () => <String, dynamic>{},
+                                );
+                            final hargaTotal =
+                                (double.tryParse(
+                                      '${barang['harga_satuan'] ?? 0}',
+                                    ) ??
+                                    0) *
+                                qty;
+
+                            if (row['id'] == null) {
+                              final newKunjunganId = SyncService.instance
+                                  .generateId();
+                              await SyncService.instance
+                                  .mutateData('tugas_kunjungan', 'insert', {
+                                    'id': newKunjunganId,
+                                    'tugas_id': tugas['id'],
+                                    'klien_id': row['klien_id'],
+                                    'status': 'pending',
+                                    'total_dibayar': 0,
+                                  });
+                              await SyncService.instance
+                                  .mutateData('tugas_item', 'insert', {
+                                    'id': SyncService.instance.generateId(),
+                                    'kunjungan_id': newKunjunganId,
+                                    'barang_id': row['barang_id'],
+                                    'qty_diminta': qty,
+                                    'qty_dikirim': 0,
+                                    'harga_total': hargaTotal,
+                                  });
+                            } else {
+                              await SyncService.instance.mutateData(
+                                'tugas_kunjungan',
+                                'update',
+                                {'id': row['id'], 'klien_id': row['klien_id']},
+                              );
+                              if (row['tugas_item_id'] != null) {
+                                await SyncService.instance
+                                    .mutateData('tugas_item', 'update', {
+                                      'id': row['tugas_item_id'],
+                                      'barang_id': row['barang_id'],
+                                      'qty_diminta': qty,
+                                      'harga_total': hargaTotal,
+                                    });
+                              }
+                            }
+                          }
+
+                          List<String> currentMuatanIds = muatanEdit
+                              .where((e) => e['id'] != null)
+                              .map((e) => e['id'].toString())
+                              .toList();
+                          for (var raw in muatanRaw) {
+                            if (!currentMuatanIds.contains(raw['id'])) {
+                              await SyncService.instance.mutateData(
+                                'muatan_tugas',
+                                'delete',
+                                {'id': raw['id']},
+                              );
+                            }
+                          }
+                          for (var row in muatanEdit) {
+                            if (row['barang_id'] == null) continue;
+                            final qty = int.tryParse(row['qty'].text) ?? 0;
+
+                            if (row['id'] == null) {
+                              await SyncService.instance
+                                  .mutateData('muatan_tugas', 'insert', {
+                                    'id': SyncService.instance.generateId(),
+                                    'tugas_id': tugas['id'],
+                                    'barang_id': row['barang_id'],
+                                    'qty_bawa': qty,
+                                    'qty_sisa': 0,
+                                  });
+                            } else {
+                              await SyncService.instance
+                                  .mutateData('muatan_tugas', 'update', {
+                                    'id': row['id'],
+                                    'barang_id': row['barang_id'],
+                                    'qty_bawa': qty,
+                                  });
+                            }
+                          }
+
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Tugas berhasil diperbarui!'),
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('Simpan Perubahan'),
+                      ),
                     ],
                   ),
                 ),

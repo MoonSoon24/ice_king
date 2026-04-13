@@ -354,6 +354,42 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     }
   }
 
+  int _getSisaMuatan(String barangId) {
+    // 1. Total kuantitas barang yang dibawa saat berangkat
+    final muatanList = SyncService.instance.daftarMuatanTugas.value.where(
+      (m) => m['tugas_id'] == widget.tugas['id'] && m['barang_id'] == barangId,
+    );
+    final totalBawa = muatanList.fold(
+      0,
+      (sum, m) => sum + (int.tryParse('${m['qty_bawa'] ?? 0}') ?? 0),
+    );
+
+    // 2. Cari semua kunjungan yang SUDAH SELESAI ('delivered')
+    final deliveredKunjungans = SyncService.instance.daftarTugasKunjungan.value
+        .where(
+          (k) =>
+              k['tugas_id'] == widget.tugas['id'] &&
+              (k['status_kunjungan'] == 'delivered' ||
+                  k['status'] == 'delivered'),
+        )
+        .map((k) => k['id'])
+        .toSet();
+
+    // 3. Hitung berapa banyak barang ini yang sudah diturunkan (qty_dikirim) ke tujuan-tujuan selesai
+    final deliveredItems = SyncService.instance.daftarTugasItem.value.where(
+      (ti) =>
+          deliveredKunjungans.contains(ti['kunjungan_id']) &&
+          ti['barang_id'] == barangId,
+    );
+    final totalTerkirim = deliveredItems.fold(
+      0,
+      (sum, ti) => sum + (int.tryParse('${ti['qty_dikirim'] ?? 0}') ?? 0),
+    );
+
+    // Sisa kendaraan = Bawa awal - Total sudah turun
+    return totalBawa - totalTerkirim;
+  }
+
   // --- UI BUILDERS ---
 
   Widget _buildPendingReorderView() {
@@ -540,21 +576,24 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           const SizedBox(height: 16),
 
           // 2. FORM ITEM & PAYMENT
-          ...items.map(
-            (item) => Padding(
+          ...items.map((item) {
+            final barangId = item['barang_id'];
+            final sisaDiMobil = barangId != null ? _getSisaMuatan(barangId) : 0;
+
+            return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: TextField(
                 controller: _qtyCtrls[item['id']],
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText:
-                      '${barangById[item['barang_id']]?['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']})',
+                      '${barangById[barangId]?['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']} | Sisa di Mobil: $sisaDiMobil)',
                   prefixIcon: const Icon(Icons.inventory_2_outlined),
                   border: const OutlineInputBorder(),
                 ),
               ),
-            ),
-          ),
+            );
+          }),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _metode,
@@ -623,15 +662,17 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isPending ? 'Susun Rute Anda' : 'Tugas Berjalan'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
-      ),
+      appBar: _isLoading
+          ? null
+          : AppBar(
+              title: Text(_isPending ? 'Susun Rute Anda' : 'Tugas Berjalan'),
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              elevation: 1,
+            ),
       body: Stack(
         children: [
-          // 1. Konten Utama (Akan berganti otomatis ketika _isPending berubah)
+          // 1. Konten Utama
           Positioned.fill(
             child: _isPending
                 ? _buildPendingReorderView()
@@ -641,11 +682,10 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           // 2. Animasi Layar Loading Putih Transisi
           Positioned.fill(
             child: IgnorePointer(
-              ignoring:
-                  !_isLoading, // Cegah klik/interaksi kalau tidak sedang loading
+              ignoring: !_isLoading,
               child: AnimatedOpacity(
                 opacity: _isLoading ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 350), // Durasi fade
+                duration: const Duration(milliseconds: 350),
                 child: Container(
                   color: Colors.white,
                   child: const Center(
