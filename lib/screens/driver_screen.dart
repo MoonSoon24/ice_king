@@ -272,12 +272,19 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     for (final item in items) {
       final qty = int.tryParse(_qtyCtrls[item['id']]!.text) ?? 0;
       final barangId = item['barang_id'];
+      final barang = SyncService.instance.daftarBarang.value.firstWhere(
+        (b) => b['id'] == barangId,
+        orElse: () => <String, dynamic>{},
+      );
+      final hargaSatuan =
+          double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
       if (barangId != null)
         qtyPerBarang[barangId] = (qtyPerBarang[barangId] ?? 0) + qty;
 
       await SyncService.instance.mutateData('tugas_item', 'update', {
         'id': item['id'],
         'qty_dikirim': qty,
+        'harga_total': qty * hargaSatuan,
       }, showSnackbar: false);
     }
 

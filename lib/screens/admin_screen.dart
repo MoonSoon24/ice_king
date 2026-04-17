@@ -777,12 +777,19 @@ class _AdminScreenState extends State<AdminScreen>
                                                       orElse: () =>
                                                           <String, dynamic>{},
                                                     );
+                                                final hargaSatuan =
+                                                    double.tryParse(
+                                                      '${barang['harga_satuan'] ?? 0}',
+                                                    ) ??
+                                                    0;
+                                                final qtyDikirimSaatIni =
+                                                    int.tryParse(
+                                                      '${row['qty_dikirim'] ?? 0}',
+                                                    ) ??
+                                                    0;
                                                 final hargaTotal =
-                                                    (double.tryParse(
-                                                          '${barang['harga_satuan'] ?? 0}',
-                                                        ) ??
-                                                        0) *
-                                                    qty;
+                                                    hargaSatuan *
+                                                    qtyDikirimSaatIni;
 
                                                 if (row['id'] == null) {
                                                   final newKunjunganId =
@@ -816,8 +823,7 @@ class _AdminScreenState extends State<AdminScreen>
                                                               row['barang_id'],
                                                           'qty_diminta': qty,
                                                           'qty_dikirim': 0,
-                                                          'harga_total':
-                                                              hargaTotal,
+                                                          'harga_total': 0,
                                                         },
                                                       );
                                                 } else {
@@ -963,7 +969,6 @@ class _AdminScreenState extends State<AdminScreen>
     return 'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 
-  // UPDATED: Ringkasan detail per klien + alasan + waktu pengerjaan dari audit_log
   Widget _buildCompletedTugasInfo(Map<String, dynamic> tugas) {
     final kunjungan = SyncService.instance.daftarTugasKunjungan.value
         .where((k) => k['tugas_id'] == tugas['id'])
@@ -1994,12 +1999,7 @@ class _AdminScreenState extends State<AdminScreen>
                                     'barang_id': row['barang_id'],
                                     'qty_diminta': qty,
                                     'qty_dikirim': 0,
-                                    'harga_total':
-                                        (double.tryParse(
-                                              '${barang['harga_satuan'] ?? 0}',
-                                            ) ??
-                                            0) *
-                                        qty,
+                                    'harga_total': 0,
                                   });
                             }
 
