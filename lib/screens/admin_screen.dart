@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
+import '../utils/formatters.dart';
 import '../widgets/app_snackbar.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -955,18 +956,69 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  String _formatTanggalJam(dynamic rawWaktu) {
+    if (rawWaktu == null) return '-';
+    final parsed = DateTime.tryParse(rawWaktu.toString());
+    if (parsed == null) return '-';
+    final local = parsed.toLocal();
+    return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
   String _formatWaktuSelesai(Map<String, dynamic> kunjungan) {
-    final raw = kunjungan['completed_at_local'];
+    final raw = kunjungan['waktu_selesai'] ?? kunjungan['completed_at_local'];
+
     if (raw == null) {
-      return 'Waktu Penyelesaian: - (offline timestamp belum tersedia)';
+      return 'Waktu Penyelesaian: - (belum tersedia)';
     }
 
-    final parsed = DateTime.tryParse(raw.toString());
-    if (parsed == null)
+    String timeString = raw.toString();
+
+    if (!timeString.endsWith('Z') && !timeString.contains('+')) {
+      timeString += 'Z';
+    }
+
+    final parsed = DateTime.tryParse(timeString);
+    if (parsed == null) {
       return 'Waktu Penyelesaian: - (format waktu tidak valid)';
+    }
 
     final local = parsed.toLocal();
     return 'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  Map<String, dynamic>? _rekapKunjunganById(String kunjunganId) {
+    for (final r in SyncService.instance.daftarTugasKunjunganRekap.value) {
+      if ((r['id'] ?? r['tugas_kunjungan_id'])?.toString() == kunjunganId) {
+        return r;
+      }
+    }
+    return null;
+  }
+
+  String _lastStatusUpdateLabel(String kunjunganId) {
+    for (final log in SyncService.instance.daftarAuditLog.value) {
+      final tableName =
+          (log['table_name'] ?? log['table'] ?? log['tabel'] ?? '').toString();
+      if (tableName != 'tugas_kunjungan') continue;
+
+      final action = (log['action'] ?? log['aksi'] ?? log['operation'] ?? '')
+          .toString();
+      final isUpdate = action.isEmpty || action.toLowerCase() == 'update';
+      if (!isUpdate) continue;
+
+      final logRecordId =
+          (log['record_id'] ?? log['row_id'] ?? log['entity_id'])?.toString();
+      if (logRecordId != kunjunganId) continue;
+
+      final payload = log['new_data'] ?? log['data_baru'] ?? log['payload'];
+      final hasStatusField =
+          payload is Map<String, dynamic> && payload.containsKey('status');
+      if (!hasStatusField) continue;
+
+      final formatted = _formatTanggalJam(log['created_at']);
+      if (formatted != '-') return formatted;
+    }
+    return 'belum ada';
   }
 
   Widget _buildCompletedTugasInfo(Map<String, dynamic> tugas) {
@@ -974,25 +1026,231 @@ class _AdminScreenState extends State<AdminScreen>
         .where((k) => k['tugas_id'] == tugas['id'])
         .toList();
 
+    final muatan = SyncService.instance.daftarMuatanTugas.value
+        .where((m) => m['tugas_id'] == tugas['id'])
+        .toList();
+
+    double modalAwal = double.tryParse('${tugas['modal_awal'] ?? 0}') ?? 0;
+    double totalPenjualan = 0;
+    double totalKembalian = 0;
+
+    Map<String, Map<String, dynamic>> rekapBarang = {};
+
+    for (var m in muatan) {
+      final barangId = m['barang_id']?.toString();
+      if (barangId == null) continue;
+
+      final barang = SyncService.instance.daftarBarang.value.firstWhere(
+        (b) => b['id'] == barangId,
+        orElse: () => <String, dynamic>{},
+      );
+
+      rekapBarang[barangId] = {
+        'nama': barang['nama'] ?? 'Barang Tidak Diketahui',
+        'dibawa': int.tryParse('${m['qty_bawa'] ?? 0}') ?? 0,
+        'dikirim': 0,
+      };
+    }
+
+    for (var k in kunjungan) {
+      final isDelivered =
+          k['status_kunjungan'] == 'delivered' || k['status'] == 'delivered';
+
+      if (isDelivered) {
+        if (k['metode_bayar'] == 'cash') {
+          double dibayar = double.tryParse('${k['total_dibayar'] ?? 0}') ?? 0;
+          totalPenjualan += dibayar;
+
+          double hargaAsliKunjungan = 0;
+          final itemsKunjungan = SyncService.instance.daftarTugasItem.value
+              .where((ti) => ti['kunjungan_id'] == k['id']);
+
+          for (var item in itemsKunjungan) {
+            hargaAsliKunjungan +=
+                double.tryParse('${item['harga_total'] ?? 0}') ?? 0;
+          }
+
+          double kembalianDariDb =
+              double.tryParse('${k['kembalian'] ?? 0}') ?? 0;
+          double kembalianDihitung = dibayar > hargaAsliKunjungan
+              ? (dibayar - hargaAsliKunjungan)
+              : 0;
+
+          totalKembalian += (kembalianDariDb > 0
+              ? kembalianDariDb
+              : kembalianDihitung);
+        }
+
+        final items = SyncService.instance.daftarTugasItem.value.where(
+          (ti) => ti['kunjungan_id'] == k['id'],
+        );
+
+        for (var item in items) {
+          final barangId = item['barang_id']?.toString();
+          if (barangId != null && rekapBarang.containsKey(barangId)) {
+            rekapBarang[barangId]!['dikirim'] +=
+                (int.tryParse('${item['qty_dikirim'] ?? 0}') ?? 0);
+          }
+        }
+      }
+    }
+
+    double expectedPhysicalCash = modalAwal + totalPenjualan - totalKembalian;
+
+    List<String> sisaItems = [];
+    rekapBarang.forEach((key, val) {
+      int sisa = val['dibawa'] - val['dikirim'];
+      if (sisa > 0) {
+        sisaItems.add('${val['nama']} (${sisa})');
+      }
+    });
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Card(
-          color: Colors.blue.shade50,
-          elevation: 0,
+          color: Colors.green.shade50,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.blue.shade200),
+            side: BorderSide(color: Colors.green.shade300, width: 2),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(
-              'Status Tugas: ${(tugas['status'] ?? tugas['status_tugas'] ?? '-').toString().toUpperCase()}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.attach_money, color: Colors.green),
+                    SizedBox(width: 8),
+                    Text(
+                      'Uang (Setoran Fisik)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.green),
+                _buildSummaryRow(
+                  'Modal Awal',
+                  '${AppFormatters.currencyIdr(modalAwal)}',
+                  textColor: Colors.black87,
+                ),
+                _buildSummaryRow(
+                  'Total Penjualan',
+                  '+ ${AppFormatters.currencyIdr(totalPenjualan)}',
+                  textColor: Colors.green.shade700,
+                ),
+                if (totalKembalian > 0)
+                  _buildSummaryRow(
+                    'Kembalian',
+                    '- ${AppFormatters.currencyIdr(totalKembalian)}',
+                    textColor: Colors.red.shade700,
+                  ),
+                const Divider(color: Colors.green, thickness: 2),
+                _buildSummaryRow(
+                  'Total Uang Fisik Disetor',
+                  '${AppFormatters.currencyIdr(expectedPhysicalCash)}',
+                  isTotal: true,
+                ),
+              ],
             ),
           ),
         ),
         const SizedBox(height: 16),
+
+        Card(
+          color: Colors.orange.shade50,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.orange.shade300, width: 2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.inventory_2_outlined, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text(
+                      'Barang',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.orange),
+
+                ...rekapBarang.values.map((val) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          val['nama'],
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '   Dibawa: ${val['dibawa']}',
+                              style: TextStyle(color: Colors.grey.shade800),
+                            ),
+                            Text(
+                              '   Dikirim: -${val['dikirim']}',
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+
+                const Divider(color: Colors.orange, thickness: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Sisa Muatan Kembali',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        sisaItems.isEmpty
+                            ? 'Tidak ada (Habis)'
+                            : sisaItems.join('\n'),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: sisaItems.isEmpty
+                              ? Colors.green.shade700
+                              : Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // === DETAIL KUNJUNGAN (KLIEN) ===
         const Text(
           'Detail Kunjungan (Klien):',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -1076,6 +1334,57 @@ class _AdminScreenState extends State<AdminScreen>
                       ),
                     );
                   }),
+                  const SizedBox(height: 8),
+                  Builder(
+                    builder: (context) {
+                      final rekap = _rekapKunjunganById(
+                        k['id']?.toString() ?? '',
+                      );
+                      final metodeBayar =
+                          (rekap?['metode_bayar'] ?? k['metode_bayar'])
+                              ?.toString()
+                              .trim();
+                      final totalTagihan =
+                          rekap?['total_tagihan_kunjungan'] ??
+                          k['total_tagihan_kunjungan'];
+                      final totalDibayar =
+                          rekap?['total_dibayar'] ?? k['total_dibayar'];
+                      final kembalian = rekap?['kembalian'] ?? k['kembalian'];
+                      final showKembalian =
+                          (double.tryParse(kembalian?.toString() ?? '') ?? 0) >
+                          0;
+                      final isCash =
+                          (metodeBayar ?? '').toLowerCase() == 'cash';
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Total Tagihan: ${AppFormatters.currencyIdr(totalTagihan)}',
+                          ),
+                          if (isCash)
+                            Text(
+                              'Total Dibayar: ${AppFormatters.currencyIdr(totalDibayar)}',
+                            ),
+                          if (showKembalian)
+                            Text(
+                              'Kembalian: ${AppFormatters.currencyIdr(kembalian)}',
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  if (isDelivered)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        'Metode: ${(k['metode_bayar'] ?? '-').toString().toUpperCase()}',
+                        style: TextStyle(
+                          color: Colors.blue.shade700,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   if (k['catatan'] != null &&
                       k['catatan'].toString().trim().isNotEmpty) ...[
                     const SizedBox(height: 8),
@@ -1103,6 +1412,37 @@ class _AdminScreenState extends State<AdminScreen>
           );
         }),
       ],
+    );
+  }
+
+  Widget _buildSummaryRow(
+    String label,
+    String value, {
+    bool isTotal = false,
+    Color? textColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+              fontSize: isTotal ? 16 : 14,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.bold,
+              fontSize: isTotal ? 18 : 14,
+              color: textColor ?? (isTotal ? Colors.black : Colors.black87),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1213,6 +1553,15 @@ class _AdminScreenState extends State<AdminScreen>
                           color: isActiveLocation
                               ? Colors.blue.shade600
                               : Colors.grey.shade600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Update status terakhir: ${_lastStatusUpdateLabel(visit['id']?.toString() ?? '')}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                          fontStyle: FontStyle.italic,
                         ),
                       ),
                     ],
@@ -1565,6 +1914,7 @@ class _AdminScreenState extends State<AdminScreen>
 
   Future<void> _buatTugas() async {
     final ctrlNamaTugas = TextEditingController();
+    final ctrlModalAwal = TextEditingController(text: '0');
     String? selectedKaryawanId;
     final List<Map<String, dynamic>> kunjungan = [
       {'klien_id': null, 'barang_id': null, 'qty': TextEditingController()},
@@ -1618,6 +1968,15 @@ class _AdminScreenState extends State<AdminScreen>
                     decoration: const InputDecoration(
                       labelText: 'Nama tugas',
                       prefixIcon: Icon(Icons.task_alt),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrlModalAwal,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Modal awal',
+                      prefixIcon: Icon(Icons.payments_outlined),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1934,7 +2293,11 @@ class _AdminScreenState extends State<AdminScreen>
                                   'nama_tugas': ctrlNamaTugas.text.trim(),
                                   'status': 'pending',
                                   'karyawan_id': selectedKaryawanId,
-                                  'modal_awal': 0,
+                                  'modal_awal':
+                                      double.tryParse(
+                                        ctrlModalAwal.text.trim(),
+                                      ) ??
+                                      0,
                                 });
                             for (final entry in totalMuatanByBarang.entries) {
                               await SyncService.instance

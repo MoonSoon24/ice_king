@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../utils/formatters.dart';
 import '../services/sync_service.dart';
 import '../widgets/app_snackbar.dart';
 
@@ -317,7 +318,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       'total_dibayar': _metode == 'cash'
           ? (double.tryParse(_tunaiCtrl.text) ?? 0)
           : 0,
-      'waktu_selesai': DateTime.now().toIso8601String(),
+      'waktu_selesai': DateTime.now().toUtc().toIso8601String(),
     }, showSnackbar: false);
 
     await _cekStatusTugasSelesai(
@@ -334,7 +335,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       'id': activeKunjungan['id'],
       'status': 'failed',
       'catatan': catatan.trim(),
-      'waktu_selesai': DateTime.now().toIso8601String(),
+      'waktu_selesai': DateTime.now().toUtc().toIso8601String(),
     }, showSnackbar: false);
 
     await _cekStatusTugasSelesai(
@@ -798,18 +799,51 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     );
   }
 
+  String _formatTanggalJam(dynamic rawWaktu) {
+    if (rawWaktu == null) return '-';
+    final parsed = DateTime.tryParse(rawWaktu.toString());
+    if (parsed == null) return '-';
+    final local = parsed.toLocal();
+    return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
   String _formatWaktuSelesai(Map<String, dynamic> kunjungan) {
-    final raw = kunjungan['completed_at_local'];
+    final raw = kunjungan['waktu_selesai'] ?? kunjungan['completed_at_local'];
+
     if (raw == null) {
-      return 'Waktu Penyelesaian: - (offline timestamp belum tersedia)';
+      return 'Waktu Penyelesaian: - (belum tersedia)';
     }
 
-    final parsed = DateTime.tryParse(raw.toString());
-    if (parsed == null)
+    String timeString = raw.toString();
+
+    if (!timeString.endsWith('Z') && !timeString.contains('+')) {
+      timeString += 'Z';
+    }
+
+    final parsed = DateTime.tryParse(timeString);
+    if (parsed == null) {
       return 'Waktu Penyelesaian: - (format waktu tidak valid)';
+    }
 
     final local = parsed.toLocal();
     return 'Waktu Penyelesaian: ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  Map<String, dynamic>? _rekapKunjunganById(String kunjunganId) {
+    for (final r in SyncService.instance.daftarTugasKunjunganRekap.value) {
+      if ((r['id'] ?? r['tugas_kunjungan_id'])?.toString() == kunjunganId) {
+        return r;
+      }
+    }
+    return null;
+  }
+
+  String _formatNominal(dynamic value) {
+    final number = double.tryParse(value?.toString() ?? '');
+    if (number == null) return '-';
+    final asInt = number.toInt();
+    final text = number == asInt ? asInt.toString() : number.toStringAsFixed(2);
+    return 'Rp$text';
   }
 
   // UPDATED: Menampilkan detil ringkasan untuk seluruh klien bila selesai tugas layaknya Admin Screen
@@ -923,6 +957,48 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                         ),
                       );
                     }),
+                    const SizedBox(height: 8),
+                    Builder(
+                      builder: (context) {
+                        final rekap = _rekapKunjunganById(
+                          k['id']?.toString() ?? '',
+                        );
+                        final metodeBayar =
+                            (rekap?['metode_bayar'] ?? k['metode_bayar'])
+                                ?.toString()
+                                .trim();
+                        final totalTagihan =
+                            rekap?['total_tagihan_kunjungan'] ??
+                            k['total_tagihan_kunjungan'];
+                        final totalDibayar =
+                            rekap?['total_dibayar'] ?? k['total_dibayar'];
+                        final kembalian = rekap?['kembalian'] ?? k['kembalian'];
+                        final showKembalian =
+                            (double.tryParse(kembalian?.toString() ?? '') ??
+                                0) >
+                            0;
+                        final isCash =
+                            (metodeBayar ?? '').toLowerCase() == 'cash';
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Total Tagihan: ${_formatNominal(totalTagihan)}',
+                            ),
+                            Text(
+                              'Metode Bayar: ${metodeBayar?.isNotEmpty == true ? metodeBayar : '-'}',
+                            ),
+                            if (isCash)
+                              Text(
+                                'Total Dibayar: ${_formatNominal(totalDibayar)}',
+                              ),
+                            if (showKembalian)
+                              Text('Kembalian: ${_formatNominal(kembalian)}'),
+                          ],
+                        );
+                      },
+                    ),
                     if (k['catatan'] != null &&
                         k['catatan'].toString().trim().isNotEmpty) ...[
                       const SizedBox(height: 8),

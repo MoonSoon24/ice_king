@@ -34,6 +34,10 @@ class SyncService {
   final ValueNotifier<List<Map<String, dynamic>>> daftarKlien = ValueNotifier(
     [],
   );
+  final ValueNotifier<List<Map<String, dynamic>>> daftarAuditLog =
+      ValueNotifier([]);
+  final ValueNotifier<List<Map<String, dynamic>>> daftarTugasKunjunganRekap =
+      ValueNotifier([]);
 
   bool isOnline = true;
 
@@ -77,6 +81,10 @@ class SyncService {
     daftarKaryawan.value = _decodeList(_prefs.getString('cache_karyawan'));
     daftarBarang.value = _decodeList(_prefs.getString('cache_barang'));
     daftarKlien.value = _decodeList(_prefs.getString('cache_klien'));
+    daftarAuditLog.value = _decodeList(_prefs.getString('cache_audit_log'));
+    daftarTugasKunjunganRekap.value = _decodeList(
+      _prefs.getString('cache_tugas_kunjungan_rekap'),
+    );
   }
 
   List<Map<String, dynamic>> _decodeList(String? raw) {
@@ -101,6 +109,11 @@ class SyncService {
         SupabaseConfig.client.from('karyawan').select(),
         SupabaseConfig.client.from('barang').select(),
         SupabaseConfig.client.from('klien').select(),
+        SupabaseConfig.client
+            .from('audit_log')
+            .select()
+            .order('created_at', ascending: false),
+        SupabaseConfig.client.from('tugas_kunjungan_rekap').select(),
       ]);
 
       final kunjungan = List<Map<String, dynamic>>.from(hasil[0] as List);
@@ -111,18 +124,18 @@ class SyncService {
       final karyawan = List<Map<String, dynamic>>.from(hasil[5] as List);
       final barang = List<Map<String, dynamic>>.from(hasil[6] as List);
       final klien = List<Map<String, dynamic>>.from(hasil[7] as List);
+      final auditLog = List<Map<String, dynamic>>.from(hasil[8] as List);
+      final kunjunganRekap = List<Map<String, dynamic>>.from(hasil[9] as List);
 
       final karyawanById = {for (final k in karyawan) k['id']: k};
       final klienById = {for (final k in klien) k['id']: k};
 
-      // PERBAIKAN: Isi daftarTugas KHUSUS untuk tabel tugas (Parent)
       daftarTugas.value = tugas.map((t) {
         final driverId = t['karyawan_id'];
         final driver = driverId != null ? karyawanById[driverId] : null;
         return {...t, 'nama_driver': driver?['nama'] ?? 'Unknown Driver'};
       }).toList();
 
-      // PERBAIKAN: Isi daftarTugasKunjungan KHUSUS untuk tabel kunjungan (Children/Rute)
       daftarTugasKunjungan.value = kunjungan.map((k) {
         final klienData = klienById[k['klien_id']];
         return {...k, 'nama_klien': klienData?['nama'] ?? 'Unknown Klien'};
@@ -134,8 +147,9 @@ class SyncService {
       daftarKaryawan.value = karyawan;
       daftarBarang.value = barang;
       daftarKlien.value = klien;
+      daftarAuditLog.value = auditLog;
+      daftarTugasKunjunganRekap.value = kunjunganRekap;
 
-      // PERBAIKAN: Simpan cache secara terpisah
       await _prefs.setString('cache_tugas', jsonEncode(daftarTugas.value));
       await _prefs.setString(
         'cache_tugas_kunjungan',
@@ -160,6 +174,14 @@ class SyncService {
       );
       await _prefs.setString('cache_barang', jsonEncode(daftarBarang.value));
       await _prefs.setString('cache_klien', jsonEncode(daftarKlien.value));
+      await _prefs.setString(
+        'cache_audit_log',
+        jsonEncode(daftarAuditLog.value),
+      );
+      await _prefs.setString(
+        'cache_tugas_kunjungan_rekap',
+        jsonEncode(daftarTugasKunjunganRekap.value),
+      );
     } catch (e) {
       debugPrint('Gagal tarik data cloud: $e');
     }
