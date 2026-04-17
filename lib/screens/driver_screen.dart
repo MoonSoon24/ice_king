@@ -156,10 +156,25 @@ class DriverTugasDetailScreen extends StatefulWidget {
       _DriverTugasDetailScreenState();
 }
 
+class _RouteEntry {
+  const _RouteEntry({
+    required this.routeKey,
+    required this.routeName,
+    required this.visitIds,
+    required this.isMergedCard,
+  });
+
+  final String routeKey;
+  final String routeName;
+  final List<String> visitIds;
+  final bool isMergedCard;
+}
+
 class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   List<Map<String, dynamic>> _kunjunganList = [];
   bool _isPending = true;
   bool _isLoading = false;
+  final Set<String> _splitRouteKeys = {};
 
   final Map<String, TextEditingController> _qtyCtrls = {};
   final TextEditingController _tunaiCtrl = TextEditingController();
@@ -191,10 +206,131 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
         .where((k) => k['tugas_id'] == widget.tugas['id'])
         .toList();
 
-    raw.sort((a, b) => (a['urutan'] ?? 0).compareTo(b['urutan'] ?? 0));
+    raw.sort((a, b) {
+      final urutanA = int.tryParse('${a['urutan'] ?? 0}') ?? 0;
+      final urutanB = int.tryParse('${b['urutan'] ?? 0}') ?? 0;
+      return urutanA.compareTo(urutanB);
+    });
     _kunjunganList = List.from(raw);
+    _normalizeMergedRoutes();
 
     _refreshActiveForm();
+  }
+
+  String _routeName(Map<String, dynamic> kunjungan) =>
+      (kunjungan['nama_klien'] ?? '-').toString();
+
+  String _routeKey(Map<String, dynamic> kunjungan) =>
+      _routeName(kunjungan).trim().toLowerCase();
+
+  void _normalizeMergedRoutes() {
+    if (!_isPending || _kunjunganList.isEmpty) return;
+
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    final keyOrder = <String>[];
+
+    for (final kunjungan in _kunjunganList) {
+      final key = _routeKey(kunjungan);
+      if (!grouped.containsKey(key)) {
+        keyOrder.add(key);
+        grouped[key] = [];
+      }
+      grouped[key]!.add(kunjungan);
+    }
+
+    _kunjunganList = [for (final key in keyOrder) ...grouped[key]!];
+  }
+
+  Map<String, int> _routeCounts() {
+    final counts = <String, int>{};
+    for (final kunjungan in _kunjunganList) {
+      final key = _routeKey(kunjungan);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  List<_RouteEntry> _buildReorderEntries() {
+    final counts = _routeCounts();
+    final entries = <_RouteEntry>[];
+    int i = 0;
+
+    while (i < _kunjunganList.length) {
+      final current = _kunjunganList[i];
+      final key = _routeKey(current);
+      final totalCount = counts[key] ?? 1;
+      final shouldShowMerged = totalCount > 1 && !_splitRouteKeys.contains(key);
+
+      if (shouldShowMerged) {
+        final groupedIds = _kunjunganList
+            .where((k) => _routeKey(k) == key)
+            .map((k) => k['id'].toString())
+            .toList();
+        entries.add(
+          _RouteEntry(
+            routeKey: key,
+            routeName: _routeName(current),
+            visitIds: groupedIds,
+            isMergedCard: true,
+          ),
+        );
+        i += totalCount;
+      } else {
+        entries.add(
+          _RouteEntry(
+            routeKey: key,
+            routeName: _routeName(current),
+            visitIds: [current['id'].toString()],
+            isMergedCard: false,
+          ),
+        );
+        i += 1;
+      }
+    }
+    return entries;
+  }
+
+  void _onReorderPending(int oldIndex, int newIndex) {
+    final entries = _buildReorderEntries();
+    if (newIndex > oldIndex) newIndex -= 1;
+    final moved = entries.removeAt(oldIndex);
+    entries.insert(newIndex, moved);
+
+    final byId = {for (final k in _kunjunganList) k['id'].toString(): k};
+
+    final reorderedIds = <String>[
+      for (final entry in entries) ...entry.visitIds,
+    ];
+
+    _kunjunganList = [
+      for (final id in reorderedIds)
+        if (byId[id] != null) byId[id]!,
+    ];
+  }
+
+  void _setRouteSplit(String routeKey, bool split) {
+    setState(() {
+      if (split) {
+        _splitRouteKeys.add(routeKey);
+      } else {
+        _splitRouteKeys.remove(routeKey);
+        _normalizeMergedRoutes();
+      }
+    });
+  }
+
+  List<Map<String, dynamic>> _orderedKunjunganForSaving() {
+    if (!_isPending) return List<Map<String, dynamic>>.from(_kunjunganList);
+    final entries = _buildReorderEntries();
+    final byId = {for (final k in _kunjunganList) k['id'].toString(): k};
+    final ordered = <Map<String, dynamic>>[];
+    for (final entry in entries) {
+      for (final id in entry.visitIds) {
+        final row = byId[id];
+        if (row != null) ordered.add(row);
+      }
+    }
+    return ordered;
   }
 
   void _refreshActiveForm() {
@@ -239,17 +375,30 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       _isLoading = true;
     });
 
-    for (int i = 0; i < _kunjunganList.length; i++) {
-      await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
-        'id': _kunjunganList[i]['id'],
-        'urutan': i,
-      }, showSnackbar: false);
-    }
+    final orderedKunjungan = _orderedKunjunganForSaving();
+    _kunjunganList = List<Map<String, dynamic>>.from(orderedKunjungan);
 
-    await SyncService.instance.mutateData('tugas', 'update', {
-      'id': widget.tugas['id'],
-      'status': 'in_progress',
-    });
+    final sync = SyncService.instance;
+    final wasOnline = sync.isOnline;
+    sync.isOnline = false;
+    try {
+      for (int i = 0; i < orderedKunjungan.length; i++) {
+        await sync.mutateData('tugas_kunjungan', 'update', {
+          'id': orderedKunjungan[i]['id'],
+          'urutan': i,
+        }, showSnackbar: false);
+      }
+
+      await sync.mutateData('tugas', 'update', {
+        'id': widget.tugas['id'],
+        'status': 'in_progress',
+      });
+    } finally {
+      sync.isOnline = wasOnline;
+    }
+    if (wasOnline) {
+      await sync.sinkronkanSemua();
+    }
 
     widget.tugas['status'] = 'in_progress';
     await Future.delayed(const Duration(milliseconds: 600));
@@ -259,7 +408,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     setState(() {
       _isPending = false;
       _isLoading = false;
-      _loadData();
+      _refreshActiveForm();
     });
   }
 
@@ -452,6 +601,34 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     Map<String, dynamic> activeKunjungan,
     List<Map<String, dynamic>> items,
   ) async {
+    if (_metode == 'cash') {
+      double totalTagihan = 0;
+
+      for (final item in items) {
+        final qtyInput = int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
+        final barangId = item['barang_id'];
+
+        final barang = SyncService.instance.daftarBarang.value.firstWhere(
+          (b) => b['id'] == barangId,
+          orElse: () => <String, dynamic>{},
+        );
+
+        final hargaSatuan =
+            double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
+        totalTagihan += (qtyInput * hargaSatuan);
+      }
+
+      final double totalDibayar = double.tryParse(_tunaiCtrl.text) ?? 0;
+
+      if (totalDibayar < totalTagihan) {
+        _showPrettySnackbar(
+          'Uang tunai kurang! Tagihan: ${_formatNominal(totalTagihan)} | Dibayar: ${_formatNominal(totalDibayar)}',
+          type: AppSnackbarType.error,
+        );
+        return;
+      }
+    }
+
     String? catatanTambahan;
     final adaPenyesuaianQty = items.any((item) {
       final qtyInput = int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
@@ -532,6 +709,9 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   // --- UI BUILDERS ---
 
   Widget _buildPendingReorderView() {
+    final entries = _buildReorderEntries();
+    final routeCounts = _routeCounts();
+
     return Column(
       children: [
         Container(
@@ -543,7 +723,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Tahan dan geser (drag) baris ke atas/bawah untuk menyusun rute terbaik Anda sebelum berangkat.',
+                  'Rute sama digabung otomatis. Tahan dan geser (drag) baris ke atas/bawah untuk menyusun rute terbaik Anda sebelum berangkat.',
                   style: TextStyle(color: Colors.blue),
                 ),
               ),
@@ -552,18 +732,20 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
         ),
         Expanded(
           child: ReorderableListView.builder(
-            itemCount: _kunjunganList.length,
-            onReorder: (oldIndex, newIndex) {
-              setState(() {
-                if (newIndex > oldIndex) newIndex -= 1;
-                final item = _kunjunganList.removeAt(oldIndex);
-                _kunjunganList.insert(newIndex, item);
-              });
-            },
+            itemCount: entries.length,
+            onReorder: (oldIndex, newIndex) =>
+                setState(() => _onReorderPending(oldIndex, newIndex)),
             itemBuilder: (context, index) {
-              final k = _kunjunganList[index];
+              final entry = entries[index];
+              final totalCount = routeCounts[entry.routeKey] ?? 1;
+              final isSplitCard = totalCount > 1 && !entry.isMergedCard;
+
               return Card(
-                key: ValueKey(k['id']),
+                key: ValueKey(
+                  entry.isMergedCard
+                      ? 'merged-${entry.routeKey}'
+                      : entry.visitIds.first,
+                ),
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 child: ListTile(
                   leading: CircleAvatar(
@@ -574,10 +756,33 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                     ),
                   ),
                   title: Text(
-                    k['nama_klien'] ?? '-',
+                    entry.isMergedCard
+                        ? '${entry.routeName} (${entry.visitIds.length})'
+                        : entry.routeName,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  trailing: const Icon(Icons.drag_handle),
+                  subtitle: entry.isMergedCard
+                      ? const Text('Rute digabung otomatis')
+                      : (isSplitCard
+                            ? const Text('Rute sedang dipisah')
+                            : null),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (entry.isMergedCard)
+                        TextButton(
+                          onPressed: () => _setRouteSplit(entry.routeKey, true),
+                          child: const Text('Split'),
+                        )
+                      else if (isSplitCard)
+                        TextButton(
+                          onPressed: () =>
+                              _setRouteSplit(entry.routeKey, false),
+                          child: const Text('Gabung'),
+                        ),
+                      const Icon(Icons.drag_handle),
+                    ],
+                  ),
                 ),
               );
             },

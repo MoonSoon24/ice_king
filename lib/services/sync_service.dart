@@ -60,8 +60,11 @@ class SyncService {
     });
 
     if (isOnline) {
-      await tarikSemuaDariCloud();
       await sinkronkanSemua();
+      final antrean = _prefs.getStringList('antrean_sinkron') ?? [];
+      if (antrean.isEmpty) {
+        await tarikSemuaDariCloud();
+      }
     }
   }
 
@@ -379,7 +382,9 @@ class SyncService {
     }
 
     await _prefs.setStringList('antrean_sinkron', gagal);
-    await tarikSemuaDariCloud();
+    if (gagal.isEmpty) {
+      await tarikSemuaDariCloud();
+    }
     sedangSinkron.value = false;
   }
 }

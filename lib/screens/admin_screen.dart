@@ -216,6 +216,9 @@ class _AdminScreenState extends State<AdminScreen>
       kunjunganRaw = SyncService.instance.daftarTugasKunjungan.value
           .where((k) => k['tugas_id'] == tugas['id'])
           .toList();
+      kunjunganRaw.sort(
+        (a, b) => (a['urutan'] ?? 0).compareTo(b['urutan'] ?? 0),
+      );
       muatanRaw = SyncService.instance.daftarMuatanTugas.value
           .where((m) => m['tugas_id'] == tugas['id'])
           .toList();
@@ -1025,6 +1028,7 @@ class _AdminScreenState extends State<AdminScreen>
     final kunjungan = SyncService.instance.daftarTugasKunjungan.value
         .where((k) => k['tugas_id'] == tugas['id'])
         .toList();
+    kunjungan.sort((a, b) => (a['urutan'] ?? 0).compareTo(b['urutan'] ?? 0));
 
     final muatan = SyncService.instance.daftarMuatanTugas.value
         .where((m) => m['tugas_id'] == tugas['id'])
@@ -1260,6 +1264,9 @@ class _AdminScreenState extends State<AdminScreen>
           final items = SyncService.instance.daftarTugasItem.value
               .where((ti) => ti['kunjungan_id'] == k['id'])
               .toList();
+          final totalTagihanDariItems = items.fold<double>(0, (sum, item) {
+            return sum + (double.tryParse('${item['harga_total'] ?? 0}') ?? 0);
+          });
 
           final statusKunjungan = (k['status_kunjungan'] ?? k['status'] ?? '-')
               .toString();
@@ -1344,17 +1351,28 @@ class _AdminScreenState extends State<AdminScreen>
                           (rekap?['metode_bayar'] ?? k['metode_bayar'])
                               ?.toString()
                               .trim();
-                      final totalTagihan =
+                      final rawTotalTagihan =
                           rekap?['total_tagihan_kunjungan'] ??
                           k['total_tagihan_kunjungan'];
-                      final totalDibayar =
+                      final parsedTagihan =
+                          double.tryParse('${rawTotalTagihan ?? ''}') ?? 0;
+                      final totalTagihan = parsedTagihan > 0
+                          ? parsedTagihan
+                          : totalTagihanDariItems;
+
+                      final rawTotalDibayar =
                           rekap?['total_dibayar'] ?? k['total_dibayar'];
+                      final parsedDibayar =
+                          double.tryParse('${rawTotalDibayar ?? ''}') ?? 0;
                       final kembalian = rekap?['kembalian'] ?? k['kembalian'];
                       final showKembalian =
                           (double.tryParse(kembalian?.toString() ?? '') ?? 0) >
                           0;
                       final isCash =
                           (metodeBayar ?? '').toLowerCase() == 'cash';
+                      final totalDibayar = parsedDibayar > 0
+                          ? parsedDibayar
+                          : (isCash ? totalTagihan : 0);
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
