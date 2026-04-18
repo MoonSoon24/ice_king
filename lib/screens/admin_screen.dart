@@ -55,6 +55,34 @@ class _AdminScreenState extends State<AdminScreen>
   bool get _isSelectionMode =>
       _isSelectingGudang || _isSelectingTugas || _isSelectingKlien;
 
+  Future<void> _handlePullToRefresh() async {
+    if (!SyncService.instance.isOnline) {
+      AppSnackbar.show(
+        context,
+        'Sedang offline. Menampilkan data cache terbaru.',
+        type: AppSnackbarType.warning,
+      );
+      setState(() {});
+      return;
+    }
+
+    final hasil = await SyncService.instance.sinkronkanSemua();
+    if (!mounted) return;
+    if (hasil.gagal > 0) {
+      AppSnackbar.show(
+        context,
+        'Sinkronisasi belum tuntas. ${hasil.gagal} data masih antre.',
+        type: AppSnackbarType.warning,
+      );
+    } else {
+      AppSnackbar.show(
+        context,
+        'Data berhasil diperbarui.',
+        type: AppSnackbarType.success,
+      );
+    }
+  }
+
   bool _isItemSelected(String id) {
     if (_tabController.index == 0) return _selectedGudangIds.contains(id);
     if (_tabController.index == 1) return _selectedTugasIds.contains(id);
@@ -2412,127 +2440,144 @@ class _AdminScreenState extends State<AdminScreen>
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: SyncService.instance.daftarBarang,
       builder: (context, barang, _) {
-        if (barang.isEmpty) {
-          return _buildEmptyState(
-            Icons.inventory_2_outlined,
-            'Belum ada barang di gudang.',
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: barang.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final item = barang[index];
-            return Card(
-              margin: EdgeInsets.zero,
-              child: ListTile(
-                onTap: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  if (_isSelectingGudang) {
-                    _toggleGudangSelection(itemId);
-                    return;
-                  }
-                  _editBarang(item);
-                },
-                onLongPress: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  _toggleGudangSelection(itemId);
-                },
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                leading: _isSelectingGudang
-                    ? Checkbox(
-                        value: _isItemSelected(item['id']?.toString() ?? ''),
-                        onChanged: (_) => _toggleGudangSelection(
-                          item['id']?.toString() ?? '',
-                        ),
-                      )
-                    : CircleAvatar(
-                        backgroundColor: Theme.of(
-                          context,
-                        ).colorScheme.primaryContainer,
-                        child: Icon(
-                          Icons.inventory_2,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+        return RefreshIndicator(
+          onRefresh: _handlePullToRefresh,
+          child: barang.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.6,
+                      child: _buildEmptyState(
+                        Icons.inventory_2_outlined,
+                        'Belum ada barang di gudang.',
                       ),
-                title: Text(
-                  item['nama']?.toString() ?? '-',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4.0),
-                  child: Text(
-                    'Kategori: ${item['kategori'] ?? '-'}\nStok: ${item['stok_gudang'] ?? 0}  |  Harga: Rp${item['harga_satuan'] ?? 0}',
-                    style: const TextStyle(height: 1.4),
-                  ),
-                ),
-                trailing: _isSelectingGudang
-                    ? null
-                    : Wrap(
-                        spacing: 4,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _editBarang(item),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: barang.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = barang[index];
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      child: ListTile(
+                        onTap: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          if (_isSelectingGudang) {
+                            _toggleGudangSelection(itemId);
+                            return;
+                          }
+                          _editBarang(item);
+                        },
+                        onLongPress: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          _toggleGudangSelection(itemId);
+                        },
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        leading: _isSelectingGudang
+                            ? Checkbox(
+                                value: _isItemSelected(
+                                  item['id']?.toString() ?? '',
+                                ),
+                                onChanged: (_) => _toggleGudangSelection(
+                                  item['id']?.toString() ?? '',
+                                ),
+                              )
+                            : CircleAvatar(
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer,
+                                child: Icon(
+                                  Icons.inventory_2,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                        title: Text(
+                          item['nama']?.toString() ?? '-',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text(
+                            'Kategori: ${item['kategori'] ?? '-'}\nStok: ${item['stok_gudang'] ?? 0}  |  Harga: Rp${item['harga_satuan'] ?? 0}',
+                            style: const TextStyle(height: 1.4),
                           ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: Colors.redAccent,
-                            ),
-                            onPressed: () async {
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (context) {
-                                  return AlertDialog(
-                                    title: const Text('Konfirmasi Hapus'),
-                                    content: Text(
-                                      'Yakin ingin menghapus barang "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                        ),
+                        trailing: _isSelectingGudang
+                            ? null
+                            : Wrap(
+                                spacing: 4,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit_outlined),
+                                    onPressed: () => _editBarang(item),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.redAccent,
                                     ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(
-                                          context,
-                                          false,
-                                        ), // Batal
-                                        child: const Text('Batal'),
-                                      ),
-                                      FilledButton(
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: Colors.redAccent,
-                                        ),
-                                        onPressed: () => Navigator.pop(
-                                          context,
-                                          true,
-                                        ), // Konfirmasi
-                                        child: const Text('Hapus'),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              );
+                                    onPressed: () async {
+                                      final confirmed = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) {
+                                          return AlertDialog(
+                                            title: const Text(
+                                              'Konfirmasi Hapus',
+                                            ),
+                                            content: Text(
+                                              'Yakin ingin menghapus barang "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ), // Batal
+                                                child: const Text('Batal'),
+                                              ),
+                                              FilledButton(
+                                                style: FilledButton.styleFrom(
+                                                  backgroundColor:
+                                                      Colors.redAccent,
+                                                ),
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ), // Konfirmasi
+                                                child: const Text('Hapus'),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
 
-                              if (confirmed == true) {
-                                SyncService.instance.mutateData(
-                                  'barang',
-                                  'delete',
-                                  {'id': item['id']},
-                                );
-                              }
-                            },
-                          ),
-                        ],
+                                      if (confirmed == true) {
+                                        SyncService.instance.mutateData(
+                                          'barang',
+                                          'delete',
+                                          {'id': item['id']},
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                        isThreeLine: true,
                       ),
-                isThreeLine: true,
-              ),
-            );
-          },
+                    );
+                  },
+                ),
         );
       },
     );
@@ -2542,116 +2587,129 @@ class _AdminScreenState extends State<AdminScreen>
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: SyncService.instance.daftarTugas,
       builder: (context, tugas, _) {
-        if (tugas.isEmpty) {
-          return _buildEmptyState(
-            Icons.assignment_outlined,
-            'Belum ada tugas saat ini.',
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: tugas.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final item = tugas[index];
-            final isCompleted =
-                item['status'] == 'completed' ||
-                item['status_tugas'] == 'completed';
-            final statusTugas =
-                (item['status'] ?? item['status_tugas'] ?? 'pending')
-                    .toString();
+        return RefreshIndicator(
+          onRefresh: _handlePullToRefresh,
+          child: tugas.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.6,
+                      child: _buildEmptyState(
+                        Icons.assignment_outlined,
+                        'Belum ada tugas saat ini.',
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: tugas.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final item = tugas[index];
+                    final isCompleted =
+                        item['status'] == 'completed' ||
+                        item['status_tugas'] == 'completed';
+                    final statusTugas =
+                        (item['status'] ?? item['status_tugas'] ?? 'pending')
+                            .toString();
 
-            return Card(
-              margin: EdgeInsets.zero,
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  if (_isSelectingTugas) {
-                    _toggleTugasSelection(itemId);
-                    return;
-                  }
-                  _showTugasDetail(item);
-                },
-                onLongPress: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  _toggleTugasSelection(itemId);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          if (_isSelectingTugas)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Checkbox(
-                                value: _isItemSelected(
-                                  item['id']?.toString() ?? '',
-                                ),
-                                onChanged: (_) => _toggleTugasSelection(
-                                  item['id']?.toString() ?? '',
-                                ),
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          if (_isSelectingTugas) {
+                            _toggleTugasSelection(itemId);
+                            return;
+                          }
+                          _showTugasDetail(item);
+                        },
+                        onLongPress: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          _toggleTugasSelection(itemId);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  if (_isSelectingTugas)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: Checkbox(
+                                        value: _isItemSelected(
+                                          item['id']?.toString() ?? '',
+                                        ),
+                                        onChanged: (_) => _toggleTugasSelection(
+                                          item['id']?.toString() ?? '',
+                                        ),
+                                      ),
+                                    ),
+                                  Expanded(
+                                    child: Text(
+                                      item['nama_tugas']?.toString() ?? '-',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isCompleted
+                                          ? Colors.green.shade100
+                                          : Colors.orange.shade100,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      statusTugas.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: isCompleted
+                                            ? Colors.green.shade800
+                                            : Colors.orange.shade800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          Expanded(
-                            child: Text(
-                              item['nama_tugas']?.toString() ?? '-',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                              const Divider(height: 24),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Driver: ${item['nama_driver'] ?? 'Karyawan ID: ${item['karyawan_id']}'}',
+                                  ),
+                                ],
                               ),
-                            ),
+                            ],
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isCompleted
-                                  ? Colors.green.shade100
-                                  : Colors.orange.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              statusTugas.toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isCompleted
-                                    ? Colors.green.shade800
-                                    : Colors.orange.shade800,
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                      const Divider(height: 24),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.person,
-                            size: 16,
-                            color: Colors.grey,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Driver: ${item['nama_driver'] ?? 'Karyawan ID: ${item['karyawan_id']}'}',
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              ),
-            );
-          },
         );
       },
     );
@@ -2661,126 +2719,144 @@ class _AdminScreenState extends State<AdminScreen>
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: SyncService.instance.daftarKlien,
       builder: (context, klienList, _) {
-        if (klienList.isEmpty) {
-          return _buildEmptyState(
-            Icons.business_outlined,
-            'Belum ada data klien.',
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: klienList.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final item = klienList[index];
-            return Card(
-              margin: EdgeInsets.zero,
-              child: ListTile(
-                onTap: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  if (_isSelectingKlien) {
-                    _toggleKlienSelection(itemId);
-                    return;
-                  }
-                  _editKlien(item);
-                },
-                onLongPress: () {
-                  final itemId = item['id']?.toString();
-                  if (itemId == null) return;
-                  _toggleKlienSelection(itemId);
-                },
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                leading: _isSelectingKlien
-                    ? Checkbox(
-                        value: _isItemSelected(item['id']?.toString() ?? ''),
-                        onChanged: (_) =>
-                            _toggleKlienSelection(item['id']?.toString() ?? ''),
-                      )
-                    : CircleAvatar(
-                        backgroundColor: Theme.of(
-                          context,
-                        ).colorScheme.primaryContainer,
-                        child: Icon(
-                          Icons.business,
-                          color: Theme.of(context).colorScheme.primary,
+        return RefreshIndicator(
+          onRefresh: _handlePullToRefresh,
+          child: klienList.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.6,
+                      child: _buildEmptyState(
+                        Icons.business_outlined,
+                        'Belum ada data klien.',
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: klienList.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = klienList[index];
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      child: ListTile(
+                        onTap: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          if (_isSelectingKlien) {
+                            _toggleKlienSelection(itemId);
+                            return;
+                          }
+                          _editKlien(item);
+                        },
+                        onLongPress: () {
+                          final itemId = item['id']?.toString();
+                          if (itemId == null) return;
+                          _toggleKlienSelection(itemId);
+                        },
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
                         ),
-                      ),
-                title: Text(
-                  item['nama']?.toString() ?? '-',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4.0),
-                  child: Text(
-                    '${item['alamat'] ?? '-'}\nKontak: ${item['kontak'] ?? '-'}',
-                    style: const TextStyle(height: 1.4),
-                  ),
-                ),
-                trailing: _isSelectingKlien
-                    ? null
-                    : Wrap(
-                        spacing: 4,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _editKlien(item),
+                        leading: _isSelectingKlien
+                            ? Checkbox(
+                                value: _isItemSelected(
+                                  item['id']?.toString() ?? '',
+                                ),
+                                onChanged: (_) => _toggleKlienSelection(
+                                  item['id']?.toString() ?? '',
+                                ),
+                              )
+                            : CircleAvatar(
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer,
+                                child: Icon(
+                                  Icons.business,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                        title: Text(
+                          item['nama']?.toString() ?? '-',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text(
+                            '${item['alamat'] ?? '-'}\nKontak: ${item['kontak'] ?? '-'}',
+                            style: const TextStyle(height: 1.4),
                           ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: Colors.redAccent,
-                            ),
-                            onPressed: () async {
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (context) {
-                                  return AlertDialog(
-                                    title: const Text('Konfirmasi Hapus'),
-                                    content: Text(
-                                      'Yakin ingin menghapus klien "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                        ),
+                        trailing: _isSelectingKlien
+                            ? null
+                            : Wrap(
+                                spacing: 4,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit_outlined),
+                                    onPressed: () => _editKlien(item),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.redAccent,
                                     ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(
-                                          context,
-                                          false,
-                                        ), // Batal
-                                        child: const Text('Batal'),
-                                      ),
-                                      FilledButton(
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: Colors.redAccent,
-                                        ),
-                                        onPressed: () => Navigator.pop(
-                                          context,
-                                          true,
-                                        ), // Konfirmasi
-                                        child: const Text('Hapus'),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              );
+                                    onPressed: () async {
+                                      final confirmed = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) {
+                                          return AlertDialog(
+                                            title: const Text(
+                                              'Konfirmasi Hapus',
+                                            ),
+                                            content: Text(
+                                              'Yakin ingin menghapus klien "${item['nama'] ?? 'ini'}"? Tindakan ini tidak bisa dibatalkan.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ), // Batal
+                                                child: const Text('Batal'),
+                                              ),
+                                              FilledButton(
+                                                style: FilledButton.styleFrom(
+                                                  backgroundColor:
+                                                      Colors.redAccent,
+                                                ),
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ), // Konfirmasi
+                                                child: const Text('Hapus'),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
 
-                              if (confirmed == true) {
-                                SyncService.instance.mutateData(
-                                  'klien',
-                                  'delete',
-                                  {'id': item['id']},
-                                );
-                              }
-                            },
-                          ),
-                        ],
+                                      if (confirmed == true) {
+                                        SyncService.instance.mutateData(
+                                          'klien',
+                                          'delete',
+                                          {'id': item['id']},
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                        isThreeLine: true,
                       ),
-                isThreeLine: true,
-              ),
-            );
-          },
+                    );
+                  },
+                ),
         );
       },
     );
@@ -2847,13 +2923,22 @@ class _AdminScreenState extends State<AdminScreen>
                         type: AppSnackbarType.info,
                       );
                       try {
-                        await SyncService.instance.sinkronkanSemua();
+                        final hasil = await SyncService.instance
+                            .sinkronkanSemua();
                         if (context.mounted) {
-                          AppSnackbar.show(
-                            context,
-                            'Sinkronisasi selesai!',
-                            type: AppSnackbarType.success,
-                          );
+                          if (hasil.gagal > 0) {
+                            AppSnackbar.show(
+                              context,
+                              'Sinkronisasi sebagian. ${hasil.gagal} data masih antre.',
+                              type: AppSnackbarType.warning,
+                            );
+                          } else {
+                            AppSnackbar.show(
+                              context,
+                              'Sinkronisasi selesai!',
+                              type: AppSnackbarType.success,
+                            );
+                          }
                         }
                       } catch (e) {
                         if (context.mounted) {

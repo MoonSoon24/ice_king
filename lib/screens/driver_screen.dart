@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/formatters.dart';
 import '../services/sync_service.dart';
@@ -37,105 +38,155 @@ class DriverScreen extends StatelessWidget {
         child: ValueListenableBuilder<List<Map<String, dynamic>>>(
           valueListenable: SyncService.instance.daftarTugas,
           builder: (context, tugasList, _) {
-            if (tugasList.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.local_shipping_outlined,
-                      size: 64,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Hore! Belum ada tugas hari ini.',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              );
+            Future<void> handlePullToRefresh() async {
+              if (!SyncService.instance.isOnline) {
+                AppSnackbar.show(
+                  context,
+                  'Sedang offline. Menampilkan data cache terbaru.',
+                  type: AppSnackbarType.warning,
+                );
+                return;
+              }
+              final hasil = await SyncService.instance.sinkronkanSemua();
+              if (!context.mounted) return;
+
+              if (hasil.gagal > 0) {
+                AppSnackbar.show(
+                  context,
+                  'Sinkronisasi belum tuntas. ${hasil.gagal} data masih antre.',
+                  type: AppSnackbarType.warning,
+                );
+              } else {
+                AppSnackbar.show(
+                  context,
+                  'Data driver sudah diperbarui.',
+                  type: AppSnackbarType.success,
+                );
+              }
             }
-            return ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: tugasList.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final tugas = tugasList[index];
-                final status =
-                    (tugas['status'] ?? tugas['status_tugas'] ?? 'pending')
-                        .toString();
-                final isCompleted = status == 'completed';
 
-                final jumlahTujuan = SyncService
-                    .instance
-                    .daftarTugasKunjungan
-                    .value
-                    .where((k) => k['tugas_id'] == tugas['id'])
-                    .length;
-
-                return Card(
-                  margin: EdgeInsets.zero,
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => DriverTugasDetailScreen(tugas: tugas),
-                        ),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 24,
-                            backgroundColor: isCompleted
-                                ? Colors.green.shade100
-                                : Colors.blue.shade100,
-                            child: Icon(
-                              isCompleted
-                                  ? Icons.check_circle
-                                  : Icons.local_shipping,
-                              color: isCompleted ? Colors.green : Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
+            return RefreshIndicator(
+              onRefresh: handlePullToRefresh,
+              child: tugasList.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.75,
+                          child: Center(
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Text(
-                                  tugas['nama_tugas'] ?? '-',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                Icon(
+                                  Icons.local_shipping_outlined,
+                                  size: 64,
+                                  color: Colors.grey.shade400,
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 16),
                                 Text(
-                                  '$jumlahTujuan Tujuan Pengiriman',
-                                  style: TextStyle(color: Colors.grey.shade700),
+                                  'Hore! Belum ada tugas hari ini.',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 16,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right, color: Colors.grey),
-                        ],
-                      ),
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: tugasList.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final tugas = tugasList[index];
+                        final status =
+                            (tugas['status'] ??
+                                    tugas['status_tugas'] ??
+                                    'pending')
+                                .toString();
+                        final isCompleted = status == 'completed';
+
+                        final jumlahTujuan = SyncService
+                            .instance
+                            .daftarTugasKunjungan
+                            .value
+                            .where((k) => k['tugas_id'] == tugas['id'])
+                            .length;
+
+                        return Card(
+                          margin: EdgeInsets.zero,
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      DriverTugasDetailScreen(tugas: tugas),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 24,
+                                    backgroundColor: isCompleted
+                                        ? Colors.green.shade100
+                                        : Colors.blue.shade100,
+                                    child: Icon(
+                                      isCompleted
+                                          ? Icons.check_circle
+                                          : Icons.local_shipping,
+                                      color: isCompleted
+                                          ? Colors.green
+                                          : Colors.blue,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          tugas['nama_tugas'] ?? '-',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '$jumlahTujuan Tujuan Pengiriman',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right,
+                                    color: Colors.grey,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                );
-              },
             );
           },
         ),
@@ -174,12 +225,15 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   List<Map<String, dynamic>> _kunjunganList = [];
   bool _isPending = true;
   bool _isLoading = false;
+  bool _isEditingMode = false;
   final Set<String> _splitRouteKeys = {};
 
   final Map<String, TextEditingController> _qtyCtrls = {};
   final TextEditingController _tunaiCtrl = TextEditingController();
-  String _metode = 'transfer';
+
+  String? _metode;
   String? _activeKunjunganId;
+  String? _lastPopulatedId;
 
   String _statusTugas() =>
       (widget.tugas['status'] ?? widget.tugas['status_tugas'] ?? 'pending')
@@ -195,7 +249,35 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   @override
   void initState() {
     super.initState();
+    SyncService.instance.daftarTugasKunjungan.addListener(
+      _syncUiWithLatestData,
+    );
+    SyncService.instance.daftarTugasItem.addListener(_syncUiWithLatestData);
+    SyncService.instance.daftarMuatanTugas.addListener(_syncUiWithLatestData);
+    SyncService.instance.daftarTugas.addListener(_syncUiWithLatestData);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    SyncService.instance.daftarTugasKunjungan.removeListener(
+      _syncUiWithLatestData,
+    );
+    SyncService.instance.daftarTugasItem.removeListener(_syncUiWithLatestData);
+    SyncService.instance.daftarMuatanTugas.removeListener(
+      _syncUiWithLatestData,
+    );
+    SyncService.instance.daftarTugas.removeListener(_syncUiWithLatestData);
+    _tunaiCtrl.dispose();
+    for (final ctrl in _qtyCtrls.values) {
+      ctrl.dispose();
+    }
+    super.dispose();
+  }
+
+  void _syncUiWithLatestData() {
+    if (!mounted || _isLoading) return;
+    setState(_loadData);
   }
 
   void _loadData() {
@@ -218,7 +300,13 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   }
 
   String _routeName(Map<String, dynamic> kunjungan) =>
-      (kunjungan['nama_klien'] ?? '-').toString();
+      (SyncService.instance.daftarKlien.value.firstWhere(
+                (k) => k['id'] == kunjungan['klien_id'],
+                orElse: () => <String, dynamic>{},
+              )['nama'] ??
+              kunjungan['nama_klien'] ??
+              '-')
+          .toString();
 
   String _routeKey(Map<String, dynamic> kunjungan) =>
       _routeName(kunjungan).trim().toLowerCase();
@@ -334,9 +422,15 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   }
 
   void _populateFormsFor(String id) {
+    // MENCEGAH KEBOCORAN DATA SAAT REFRESH
+    // Jika kita masih di klien yang sama, jangan reset form-nya.
+    // Ini mencegah Qty dan Tunai yang sedang diketik hilang.
+    if (_lastPopulatedId == id) return;
+
     _qtyCtrls.clear();
     _tunaiCtrl.clear();
-    _metode = 'transfer';
+    _metode = null;
+    _lastPopulatedId = id;
 
     final items = SyncService.instance.daftarTugasItem.value
         .where((e) => e['kunjungan_id'] == id)
@@ -353,7 +447,6 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     final isPendingKunjungan = statusKunjungan == 'pending';
 
     for (final item in items) {
-      // Jika pending tampilkan qty_diminta, jika sudah selesai tampilkan qty_dikirim
       final qty = isPendingKunjungan
           ? (item['qty_diminta'] ?? 0)
           : (item['qty_dikirim'] ?? item['qty_diminta'] ?? 0);
@@ -365,9 +458,13 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       if (metodeValue == 'cash' ||
           metodeValue == 'transfer' ||
           metodeValue == 'tempo') {
-        _metode = metodeValue!;
+        _metode = metodeValue;
       }
-      _tunaiCtrl.text = (kunjungan['total_dibayar'] ?? 0).toString();
+
+      final dibayar = kunjungan['total_dibayar'] ?? 0;
+      if (dibayar > 0) {
+        _setTunaiValue(double.tryParse(dibayar.toString()) ?? 0);
+      }
     }
   }
 
@@ -396,12 +493,19 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     if (currentIndex == -1) return;
 
     int newIndex = currentIndex + direction;
-
-    if (newIndex >= 0 && newIndex < _kunjunganList.length) {
-      setState(() {
-        _activeKunjunganId = _kunjunganList[newIndex]['id'];
-        _populateFormsFor(_activeKunjunganId!);
-      });
+    while (newIndex >= 0 && newIndex < _kunjunganList.length) {
+      final st =
+          _kunjunganList[newIndex]['status_kunjungan'] ??
+          _kunjunganList[newIndex]['status'];
+      if (st == 'delivered' || st == 'failed') {
+        setState(() {
+          _activeKunjunganId = _kunjunganList[newIndex]['id'];
+          _isEditingMode = false;
+          _populateFormsFor(_activeKunjunganId!);
+        });
+        return;
+      }
+      newIndex += direction;
     }
   }
 
@@ -459,6 +563,118 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     });
   }
 
+  double _getTunaiValue() {
+    final text = _tunaiCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return double.tryParse(text) ?? 0;
+  }
+
+  void _setTunaiValue(double value) {
+    if (value <= 0) {
+      _tunaiCtrl.clear();
+      return;
+    }
+    final intValue = value.toInt();
+    final formatted = intValue.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]}.',
+    );
+    _tunaiCtrl.text = formatted.endsWith('.')
+        ? formatted.substring(0, formatted.length - 1)
+        : formatted;
+  }
+
+  void _tambahTunai(double amount) {
+    final current = _getTunaiValue();
+    setState(() {
+      _setTunaiValue(current + amount);
+    });
+  }
+
+  double _calculateTotalTagihan(List<Map<String, dynamic>> items) {
+    double total = 0;
+    for (final item in items) {
+      final qtyInput = int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
+      final barangId = item['barang_id'];
+      final barang = SyncService.instance.daftarBarang.value.firstWhere(
+        (b) => b['id'] == barangId,
+        orElse: () => <String, dynamic>{},
+      );
+      final hargaSatuan =
+          double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
+      total += (qtyInput * hargaSatuan);
+    }
+    return total;
+  }
+
+  Future<void> _simpanEditKunjungan(
+    Map<String, dynamic> activeKunjungan,
+    List<Map<String, dynamic>> items,
+  ) async {
+    if (_metode == null) {
+      _showPrettySnackbar(
+        'Pilih Metode Pembayaran terlebih dahulu!',
+        type: AppSnackbarType.warning,
+      );
+      return;
+    }
+
+    if (_metode == 'cash') {
+      double totalTagihan = _calculateTotalTagihan(items);
+      final double totalDibayar = _getTunaiValue();
+      if (totalDibayar < totalTagihan) {
+        _showPrettySnackbar(
+          'Uang tunai kurang! Tagihan: ${AppFormatters.currencyIdr(totalTagihan)} | Dibayar: ${AppFormatters.currencyIdr(totalDibayar)}',
+          type: AppSnackbarType.error,
+        );
+        return;
+      }
+    }
+
+    // --- OPTIMISTIC UI UPDATE ---
+    // Inject the edited values directly into the local map so the UI
+    // doesn't clear out while waiting for Supabase to sync.
+    activeKunjungan['metode_bayar'] = _metode;
+    activeKunjungan['total_dibayar'] = _metode == 'cash' ? _getTunaiValue() : 0;
+    // ----------------------------
+
+    for (final item in items) {
+      final qty = int.tryParse(_qtyCtrls[item['id']]!.text) ?? 0;
+      final barangId = item['barang_id'];
+      final barang = SyncService.instance.daftarBarang.value.firstWhere(
+        (b) => b['id'] == barangId,
+        orElse: () => <String, dynamic>{},
+      );
+      final hargaSatuan =
+          double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
+
+      await SyncService.instance.mutateData('tugas_item', 'update', {
+        'id': item['id'],
+        'qty_dikirim': qty,
+        'harga_total': qty * hargaSatuan,
+      }, showSnackbar: false);
+    }
+
+    await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
+      'id': activeKunjungan['id'],
+      'status':
+          activeKunjungan['status_kunjungan'] ??
+          activeKunjungan['status'] ??
+          'delivered',
+      'metode_bayar': _metode,
+      'total_dibayar': _metode == 'cash' ? _getTunaiValue() : 0,
+    }, showSnackbar: false);
+
+    setState(() {
+      _isEditingMode = false;
+      _loadData();
+    });
+
+    _showPrettySnackbar(
+      'Perubahan detail kunjungan berhasil disimpan.',
+      type: AppSnackbarType.success,
+    );
+  }
+
   Future<void> _selesaikanKunjunganSaatIni(
     Map<String, dynamic> activeKunjungan,
     List<Map<String, dynamic>> items,
@@ -475,29 +691,14 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       );
       final hargaSatuan =
           double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
-      if (barangId != null)
+      if (barangId != null) {
         qtyPerBarang[barangId] = (qtyPerBarang[barangId] ?? 0) + qty;
+      }
 
       await SyncService.instance.mutateData('tugas_item', 'update', {
         'id': item['id'],
         'qty_dikirim': qty,
         'harga_total': qty * hargaSatuan,
-      }, showSnackbar: false);
-    }
-
-    final muatan = SyncService.instance.daftarMuatanTugas.value.where(
-      (m) => m['tugas_id'] == widget.tugas['id'],
-    );
-    for (final m in muatan) {
-      final barangId = m['barang_id'];
-      if (barangId == null) continue;
-      final berkurang = qtyPerBarang[barangId] ?? 0;
-      final current = int.tryParse('${m['qty_sisa'] ?? 0}') ?? 0;
-      final sisaBaru = (current - berkurang).clamp(0, 1 << 31);
-
-      await SyncService.instance.mutateData('muatan_tugas', 'update', {
-        'id': m['id'],
-        'qty_sisa': sisaBaru,
       }, showSnackbar: false);
     }
 
@@ -511,9 +712,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       'status': 'delivered',
       'catatan': catatan.isEmpty ? null : catatan,
       'metode_bayar': _metode,
-      'total_dibayar': _metode == 'cash'
-          ? (double.tryParse(_tunaiCtrl.text) ?? 0)
-          : 0,
+      'total_dibayar': _metode == 'cash' ? _getTunaiValue() : 0,
       'waktu_selesai': DateTime.now().toUtc().toIso8601String(),
     }, showSnackbar: false);
 
@@ -542,6 +741,8 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
   Future<void> _cekStatusTugasSelesai({
     required bool lanjutKeKlienBerikutnya,
   }) async {
+    if (!mounted) return;
+
     final raw = SyncService.instance.daftarTugasKunjungan.value
         .where((k) => k['tugas_id'] == widget.tugas['id'])
         .toList();
@@ -549,68 +750,103 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
       (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
     );
 
+    setState(() {
+      if (lanjutKeKlienBerikutnya && !semuaSelesai) {
+        _activeKunjunganId = null;
+      } else if (semuaSelesai) {
+        _activeKunjunganId = _kunjunganList.last['id'];
+      }
+      _isEditingMode = false;
+      _loadData();
+    });
+
     if (semuaSelesai) {
-      final kunjunganIds = raw.map((k) => k['id']).toSet();
-      final tugasItems = SyncService.instance.daftarTugasItem.value.where(
-        (ti) => kunjunganIds.contains(ti['kunjungan_id']),
+      _showPrettySnackbar(
+        'Semua tujuan telah di-drop. Silakan periksa kembali detail kunjungan dan klik "Selesaikan Tugas" di halaman ini.',
+        type: AppSnackbarType.info,
       );
-
-      // Hitung total barang yang BENAR-BENAR DIKIRIM (di-drop)
-      final Map<String, int> totalDikirimByBarang = {};
-      for (final item in tugasItems) {
-        final barangId = item['barang_id']?.toString();
-        if (barangId == null) continue;
-        final qtyDikirim = int.tryParse('${item['qty_dikirim'] ?? 0}') ?? 0;
-        totalDikirimByBarang[barangId] =
-            (totalDikirimByBarang[barangId] ?? 0) + qtyDikirim;
-      }
-
-      final muatanTugas = SyncService.instance.daftarMuatanTugas.value.where(
-        (m) => m['tugas_id'] == widget.tugas['id'],
-      );
-
-      // Update qty_sisa di muatan_tugas secara otomatis
-      for (final muatan in muatanTugas) {
-        final barangId = muatan['barang_id']?.toString();
-        final muatanId = muatan['id']?.toString();
-        if (barangId == null || muatanId == null) continue;
-
-        final qtyBawa = int.tryParse('${muatan['qty_bawa'] ?? 0}') ?? 0;
-        final qtyDikirim = totalDikirimByBarang[barangId] ?? 0;
-        final qtySisa = (qtyBawa - qtyDikirim).clamp(0, 1 << 31);
-
-        // KITA HANYA UPDATE MUATAN TUGAS. Trigger DB mengurus sisanya!
-        await SyncService.instance.mutateData('muatan_tugas', 'update', {
-          'id': muatanId,
-          'qty_sisa': qtySisa,
-        }, showSnackbar: false);
-      }
-
-      await SyncService.instance.mutateData('tugas', 'update', {
-        'id': widget.tugas['id'],
-        'status': 'completed',
-      }, showSnackbar: false);
-
-      if (mounted) {
-        Navigator.pop(context);
-        _showPrettySnackbar(
-          'Tugas selesai! Sisa muatan otomatis dikembalikan ke gudang.',
-          type: AppSnackbarType.success,
-        );
-      }
     } else {
-      if (!mounted) return;
-      setState(() {
-        if (lanjutKeKlienBerikutnya) {
-          _activeKunjunganId = null; // Memaksa mencari klien pending berikutnya
-        }
-        _loadData(); // Menyegarkan list & trigger _refreshActiveForm()
-      });
       _showPrettySnackbar(
         lanjutKeKlienBerikutnya
             ? 'Lanjut ke klien berikutnya.'
             : 'Drop tersimpan. Anda tetap melihat histori tujuan ini.',
         type: AppSnackbarType.info,
+      );
+    }
+  }
+
+  Future<void> _selesaikanTugasUtama() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Selesaikan Tugas?'),
+        content: const Text(
+          'Pastikan semua data kunjungan sudah dicek dan diisi dengan benar. '
+          'Setelah tugas ini diselesaikan, Anda TIDAK DAPAT mengubah data kunjungan lagi. '
+          'Sisa muatan barang akan otomatis dikembalikan ke gudang.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Ya, Selesaikan Tugas'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final raw = SyncService.instance.daftarTugasKunjungan.value
+        .where((k) => k['tugas_id'] == widget.tugas['id'])
+        .toList();
+    final kunjunganIds = raw.map((k) => k['id']).toSet();
+    final tugasItems = SyncService.instance.daftarTugasItem.value.where(
+      (ti) => kunjunganIds.contains(ti['kunjungan_id']),
+    );
+
+    final Map<String, int> totalDikirimByBarang = {};
+    for (final item in tugasItems) {
+      final barangId = item['barang_id']?.toString();
+      if (barangId == null) continue;
+      final qtyDikirim = int.tryParse('${item['qty_dikirim'] ?? 0}') ?? 0;
+      totalDikirimByBarang[barangId] =
+          (totalDikirimByBarang[barangId] ?? 0) + qtyDikirim;
+    }
+
+    final muatanTugas = SyncService.instance.daftarMuatanTugas.value.where(
+      (m) => m['tugas_id'] == widget.tugas['id'],
+    );
+
+    for (final muatan in muatanTugas) {
+      final barangId = muatan['barang_id']?.toString();
+      final muatanId = muatan['id']?.toString();
+      if (barangId == null || muatanId == null) continue;
+
+      final qtyBawa = int.tryParse('${muatan['qty_bawa'] ?? 0}') ?? 0;
+      final qtyDikirim = totalDikirimByBarang[barangId] ?? 0;
+      final qtySisa = (qtyBawa - qtyDikirim).clamp(0, 1 << 31);
+
+      await SyncService.instance.mutateData('muatan_tugas', 'update', {
+        'id': muatanId,
+        'qty_sisa': qtySisa,
+      }, showSnackbar: false);
+    }
+
+    await SyncService.instance.mutateData('tugas', 'update', {
+      'id': widget.tugas['id'],
+      'status': 'completed',
+    }, showSnackbar: false);
+
+    if (mounted) {
+      Navigator.pop(context);
+      _showPrettySnackbar(
+        'Tugas berhasil diselesaikan! Sisa muatan otomatis dikembalikan ke gudang.',
+        type: AppSnackbarType.success,
       );
     }
   }
@@ -654,9 +890,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     if (alasan == null) return;
 
     if (_isLastPending) {
-      await _tampilkanModalSelesaiTugas(() async {
-        await _tandaiGagal(activeKunjungan, alasan, false);
-      });
+      await _tandaiGagal(activeKunjungan, alasan, false);
     } else {
       final lanjut = await _askContinueModal();
       if (lanjut == null) return;
@@ -690,28 +924,21 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     Map<String, dynamic> activeKunjungan,
     List<Map<String, dynamic>> items,
   ) async {
+    if (_metode == null) {
+      _showPrettySnackbar(
+        'Pilih Metode Pembayaran terlebih dahulu!',
+        type: AppSnackbarType.warning,
+      );
+      return;
+    }
+
     if (_metode == 'cash') {
-      double totalTagihan = 0;
-
-      for (final item in items) {
-        final qtyInput = int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
-        final barangId = item['barang_id'];
-
-        final barang = SyncService.instance.daftarBarang.value.firstWhere(
-          (b) => b['id'] == barangId,
-          orElse: () => <String, dynamic>{},
-        );
-
-        final hargaSatuan =
-            double.tryParse('${barang['harga_satuan'] ?? 0}') ?? 0;
-        totalTagihan += (qtyInput * hargaSatuan);
-      }
-
-      final double totalDibayar = double.tryParse(_tunaiCtrl.text) ?? 0;
+      double totalTagihan = _calculateTotalTagihan(items);
+      final double totalDibayar = _getTunaiValue();
 
       if (totalDibayar < totalTagihan) {
         _showPrettySnackbar(
-          'Uang tunai kurang! Tagihan: ${_formatNominal(totalTagihan)} | Dibayar: ${_formatNominal(totalDibayar)}',
+          'Uang tunai kurang! Tagihan: ${AppFormatters.currencyIdr(totalTagihan)} | Dibayar: ${AppFormatters.currencyIdr(totalDibayar)}',
           type: AppSnackbarType.error,
         );
         return;
@@ -734,14 +961,12 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     }
 
     if (_isLastPending) {
-      await _tampilkanModalSelesaiTugas(() async {
-        await _selesaikanKunjunganSaatIni(
-          activeKunjungan,
-          items,
-          catatanTambahan,
-          false,
-        );
-      });
+      await _selesaikanKunjunganSaatIni(
+        activeKunjungan,
+        items,
+        catatanTambahan,
+        false,
+      );
     } else {
       final lanjut = await _askContinueModal();
       if (lanjut == null) return;
@@ -805,39 +1030,11 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     return totalBawa - totalTerkirim;
   }
 
-  // Helper untuk mengecek apakah ini adalah kunjungan terakhir yang pending
   bool get _isLastPending {
     final pendingList = _kunjunganList
         .where((k) => (k['status_kunjungan'] ?? k['status']) == 'pending')
         .toList();
     return pendingList.length == 1;
-  }
-
-  // Fungsi memunculkan modal penyelesaian tugas saat last drop
-  Future<void> _tampilkanModalSelesaiTugas(Function onConfirm) async {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Selesaikan Tugas?'),
-        content: const Text(
-          'Ini adalah tujuan terakhir. Apakah Anda yakin semua drop dan catatan sudah benar? Sisa muatan akan dikembalikan ke Gudang secara otomatis dan Tugas akan ditutup.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              onConfirm();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('Ya, Selesaikan'),
-          ),
-        ],
-      ),
-    );
   }
 
   // --- UI BUILDERS ---
@@ -955,6 +1152,17 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
         .toString();
     final isPendingKunjungan = statusKunjungan == 'pending';
 
+    final isEditing = _isEditingMode;
+    final showFormInputs = isPendingKunjungan || isEditing;
+
+    final semuaSelesai = _kunjunganList.every(
+      (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
+    );
+    final isLastTujuan =
+        _kunjunganList.isNotEmpty && _kunjunganList.last['id'] == active['id'];
+
+    final isTaskCompleted = _statusTugas() == 'completed';
+
     final klien = SyncService.instance.daftarKlien.value.firstWhere(
       (k) => k['id'] == active['klien_id'],
       orElse: () => {},
@@ -971,16 +1179,16 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     };
 
     return GestureDetector(
-      onHorizontalDragEnd: (details) {
-        const int sensitivity = 8;
-        if (details.primaryVelocity! > sensitivity) {
-          _geserKunjunganSelesai(
-            -1,
-          ); // Swipe Kanan -> Mundur ke klien sebelumnya
-        } else if (details.primaryVelocity! < -sensitivity) {
-          _geserKunjunganSelesai(1); // Swipe Kiri -> Maju ke klien berikutnya
-        }
-      },
+      onHorizontalDragEnd: isPendingKunjungan
+          ? null
+          : (details) {
+              const int sensitivity = 8;
+              if (details.primaryVelocity! > sensitivity) {
+                _geserKunjunganSelesai(-1);
+              } else if (details.primaryVelocity! < -sensitivity) {
+                _geserKunjunganSelesai(1);
+              }
+            },
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -993,13 +1201,15 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                 side: BorderSide(
                   color: isPendingKunjungan
                       ? Colors.blue.shade200
-                      : Colors.grey.shade300,
+                      : (isEditing
+                            ? Colors.blue.shade400
+                            : Colors.grey.shade300),
                   width: 2,
                 ),
               ),
               color: isPendingKunjungan
                   ? Colors.blue.shade50
-                  : Colors.grey.shade100,
+                  : (isEditing ? Colors.white : Colors.grey.shade100),
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
@@ -1021,14 +1231,17 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                           ),
                           child: Row(
                             children: [
-                              GestureDetector(
-                                onTap: () => _geserKunjunganSelesai(-1),
-                                child: const Icon(
-                                  Icons.chevron_left,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                              ),
+                              if (!isPendingKunjungan)
+                                GestureDetector(
+                                  onTap: () => _geserKunjunganSelesai(-1),
+                                  child: const Icon(
+                                    Icons.chevron_left,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                )
+                              else
+                                const SizedBox(width: 20),
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
@@ -1042,14 +1255,17 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                                   ),
                                 ),
                               ),
-                              GestureDetector(
-                                onTap: () => _geserKunjunganSelesai(1),
-                                child: const Icon(
-                                  Icons.chevron_right,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                              ),
+                              if (!isPendingKunjungan)
+                                GestureDetector(
+                                  onTap: () => _geserKunjunganSelesai(1),
+                                  child: const Icon(
+                                    Icons.chevron_right,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                )
+                              else
+                                const SizedBox(width: 20),
                             ],
                           ),
                         ),
@@ -1128,7 +1344,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
 
             const SizedBox(height: 24),
             Text(
-              isPendingKunjungan
+              showFormInputs
                   ? 'Input Drop Pengiriman'
                   : 'Detail Drop Pengiriman',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
@@ -1141,64 +1357,302 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                   ? _getSisaMuatan(barangId)
                   : 0;
 
+              final barangData = barangById[barangId] ?? <String, dynamic>{};
+              final hargaSatuan =
+                  double.tryParse('${barangData['harga_satuan'] ?? 0}') ?? 0;
+              final qtyInput =
+                  int.tryParse(_qtyCtrls[item['id']]?.text ?? '') ?? 0;
+              final itemSubtotal = qtyInput * hargaSatuan;
+
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: TextField(
-                  controller: _qtyCtrls[item['id']],
-                  keyboardType: TextInputType.number,
-                  readOnly:
-                      !isPendingKunjungan, // Lock the textfield if completed
-                  decoration: InputDecoration(
-                    labelText: isPendingKunjungan
-                        ? '${barangById[barangId]?['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']} | Sisa di Mobil: $sisaDiMobil)'
-                        : '${barangById[barangId]?['nama'] ?? 'Barang'} (Dikirim / Diminta: ${item['qty_diminta']})',
-                    prefixIcon: const Icon(Icons.inventory_2_outlined),
-                    border: const OutlineInputBorder(),
-                    filled: !isPendingKunjungan,
-                    fillColor: !isPendingKunjungan
-                        ? Colors.grey.shade100
-                        : null,
-                  ),
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (showFormInputs)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              color: Colors.red,
+                            ),
+                            onPressed: () {
+                              final ctrl = _qtyCtrls[item['id']];
+                              if (ctrl != null) {
+                                int val = int.tryParse(ctrl.text) ?? 0;
+                                if (val > 0) {
+                                  setState(
+                                    () => ctrl.text = (val - 1).toString(),
+                                  );
+                                }
+                              }
+                            },
+                          ),
+                        Expanded(
+                          child: TextField(
+                            controller: _qtyCtrls[item['id']],
+                            keyboardType: TextInputType.number,
+                            readOnly: !showFormInputs,
+                            onChanged: (val) {
+                              setState(() {});
+                            },
+                            decoration: InputDecoration(
+                              labelText: showFormInputs
+                                  ? '${barangData['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']} | Sisa dibawa: $sisaDiMobil)'
+                                  : '${barangData['nama'] ?? 'Barang'} (Diminta: ${item['qty_diminta']} | Sisa dibawa: $sisaDiMobil)',
+                              prefixIcon: const Icon(
+                                Icons.inventory_2_outlined,
+                              ),
+                              border: const OutlineInputBorder(),
+                              filled: !showFormInputs,
+                              fillColor: !showFormInputs
+                                  ? Colors.grey.shade100
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        if (showFormInputs)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.add_circle_outline,
+                              color: Colors.green,
+                            ),
+                            onPressed: () {
+                              final ctrl = _qtyCtrls[item['id']];
+                              if (ctrl != null) {
+                                int val = int.tryParse(ctrl.text) ?? 0;
+                                setState(
+                                  () => ctrl.text = (val + 1).toString(),
+                                );
+                              }
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               );
             }),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _metode,
-              decoration: InputDecoration(
-                labelText: 'Metode Pembayaran',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.payment),
-                filled: !isPendingKunjungan,
-                fillColor: !isPendingKunjungan ? Colors.grey.shade100 : null,
+
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.shade200),
               ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'transfer',
-                  child: Text('Transfer Bank'),
-                ),
-                DropdownMenuItem(value: 'cash', child: Text('Tunai (Cash)')),
-                DropdownMenuItem(value: 'tempo', child: Text('Jatuh Tempo')),
-              ],
-              onChanged: isPendingKunjungan
-                  ? (val) => setState(() => _metode = val ?? 'transfer')
-                  : null, // Disable dropdown if completed
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Total Keseluruhan:',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    AppFormatters.currencyIdr(_calculateTotalTagihan(items)),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            if (_metode == 'cash') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _tunaiCtrl,
-                keyboardType: TextInputType.number,
-                readOnly: !isPendingKunjungan,
-                decoration: InputDecoration(
-                  labelText: 'Diterima Tunai',
-                  prefixText: 'Rp ',
-                  border: const OutlineInputBorder(),
-                  filled: !isPendingKunjungan,
-                  fillColor: !isPendingKunjungan ? Colors.grey.shade100 : null,
-                ),
+            const SizedBox(height: 24),
+
+            Text(
+              'Metode Pembayaran',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.grey.shade800,
               ),
-            ],
+            ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: showFormInputs ? Colors.white : Colors.grey.shade100,
+                border: Border.all(color: Colors.grey.shade400),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Column(
+                    children: [
+                      RadioListTile<String>(
+                        title: const Text(
+                          'Tunai (Cash)',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        value: 'cash',
+                        groupValue: _metode,
+                        onChanged: showFormInputs
+                            ? (val) => setState(() => _metode = val)
+                            : null,
+                      ),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        child: _metode == 'cash'
+                            ? Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  16,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade50,
+                                    border: Border.all(
+                                      color: Colors.green.shade300,
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      TextField(
+                                        controller: _tunaiCtrl,
+                                        keyboardType: TextInputType.number,
+                                        readOnly: !showFormInputs,
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter
+                                              .digitsOnly,
+                                          IdrInputFormatter(),
+                                        ],
+                                        decoration: InputDecoration(
+                                          labelText: 'Diterima Tunai',
+                                          prefixText: 'Rp ',
+                                          border: const OutlineInputBorder(),
+                                          filled: !showFormInputs,
+                                          fillColor: !showFormInputs
+                                              ? Colors.grey.shade200
+                                              : Colors.white,
+                                        ),
+                                      ),
+                                      if (showFormInputs) ...[
+                                        const SizedBox(height: 12),
+                                        Center(
+                                          child: Wrap(
+                                            alignment: WrapAlignment.center,
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: [
+                                              ActionChip(
+                                                label: const Text('Uang Pas'),
+                                                backgroundColor:
+                                                    Colors.green.shade200,
+                                                onPressed: () {
+                                                  final total =
+                                                      _calculateTotalTagihan(
+                                                        items,
+                                                      );
+                                                  setState(() {
+                                                    _setTunaiValue(total);
+                                                  });
+                                                },
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 15.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(15000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 30.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(30000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 45.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(45000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 50.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(50000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 100.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(100000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 150.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(150000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text('+ 200.000'),
+                                                onPressed: () =>
+                                                    _tambahTunai(200000),
+                                              ),
+                                              ActionChip(
+                                                label: const Text(
+                                                  'Hapus',
+                                                  style: TextStyle(
+                                                    color: Colors.red,
+                                                  ),
+                                                ),
+                                                backgroundColor:
+                                                    Colors.red.shade50,
+                                                side: BorderSide(
+                                                  color: Colors.red.shade200,
+                                                ),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    _setTunaiValue(0);
+                                                  });
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 1, color: Colors.grey),
+
+                  RadioListTile<String>(
+                    title: const Text(
+                      'Transfer Bank',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    value: 'transfer',
+                    groupValue: _metode,
+                    onChanged: showFormInputs
+                        ? (val) => setState(() => _metode = val)
+                        : null,
+                  ),
+                  const Divider(height: 1, color: Colors.grey),
+
+                  RadioListTile<String>(
+                    title: const Text(
+                      'Jatuh Tempo',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    value: 'tempo',
+                    groupValue: _metode,
+                    onChanged: showFormInputs
+                        ? (val) => setState(() => _metode = val)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
 
             const SizedBox(height: 32),
 
@@ -1226,9 +1680,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                     child: FilledButton.icon(
                       onPressed: () => _onTapSelesaiDrop(active, items),
                       icon: const Icon(Icons.check_circle),
-                      label: Text(
-                        _isLastPending ? 'Selesaikan Tugas' : 'Selesai Drop',
-                      ),
+                      label: const Text('Selesai Drop'),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         backgroundColor: Colors.green,
@@ -1237,61 +1689,116 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                   ),
                 ],
               )
+            else if (isEditing)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isEditingMode = false;
+                          _lastPopulatedId = null;
+                          _populateFormsFor(active['id']);
+                        });
+                      },
+                      icon: const Icon(Icons.close),
+                      label: const Text('Batal Edit'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton.icon(
+                      onPressed: () => _simpanEditKunjungan(active, items),
+                      icon: const Icon(Icons.save),
+                      label: const Text('Simpan Perubahan'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else if (isTaskCompleted)
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _activeKunjunganId = null;
+                  });
+                },
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Kembali ke Ringkasan'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              )
             else
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: statusKunjungan == 'delivered'
-                          ? Colors.green.shade50
-                          : Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: statusKunjungan == 'delivered'
-                            ? Colors.green.shade300
-                            : Colors.red.shade300,
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          statusKunjungan == 'delivered'
-                              ? Icons.check_circle
-                              : Icons.cancel,
-                          color: statusKunjungan == 'delivered'
-                              ? Colors.green
-                              : Colors.red,
-                          size: 32,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Kunjungan ini telah selesai dan dikunci.',
-                          style: TextStyle(
-                            color: statusKunjungan == 'delivered'
-                                ? Colors.green.shade800
-                                : Colors.red.shade800,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _isEditingMode = true;
+                      });
+                    },
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Edit Data Kunjungan'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),
-                  if (_kunjunganList.every(
-                    (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
-                  )) ...[
-                    const SizedBox(height: 16),
+                  const SizedBox(height: 16),
+
+                  if (isLastTujuan && semuaSelesai)
+                    FilledButton.icon(
+                      onPressed: _selesaikanTugasUtama,
+                      icon: const Icon(Icons.flag),
+                      label: const Text('Selesaikan Tugas'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: Colors.green,
+                      ),
+                    )
+                  else if (semuaSelesai)
                     OutlinedButton(
                       onPressed: () {
                         setState(() {
-                          _activeKunjunganId =
-                              null; // Forces fallback to Summary View
+                          _activeKunjunganId = _kunjunganList.last['id'];
+                          _populateFormsFor(_activeKunjunganId!);
                         });
                       },
-                      child: const Text('Lihat Ringkasan Seluruh Klien'),
+                      child: const Text(
+                        'Pergi ke Tujuan Terakhir untuk Menyelesaikan Tugas',
+                      ),
+                    )
+                  else
+                    OutlinedButton(
+                      onPressed: () {
+                        setState(() {
+                          _activeKunjunganId = null;
+                          _refreshActiveForm();
+                        });
+                      },
+                      child: const Text('Kembali ke Pengiriman Aktif'),
                     ),
-                  ],
+
+                  if (semuaSelesai)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            _activeKunjunganId = null;
+                          });
+                        },
+                        child: const Text('Lihat Ringkasan Seluruh Klien'),
+                      ),
+                    ),
                 ],
               ),
           ],
@@ -1339,32 +1846,35 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     return null;
   }
 
-  String _formatNominal(dynamic value) {
-    final number = double.tryParse(value?.toString() ?? '');
-    if (number == null) return '-';
-    final asInt = number.toInt();
-    final text = number == asInt ? asInt.toString() : number.toStringAsFixed(2);
-    return 'Rp$text';
-  }
-
   Widget _buildCompletedSummary() {
+    final semuaSelesai = _kunjunganList.every(
+      (k) => (k['status_kunjungan'] ?? k['status']) != 'pending',
+    );
+    final isTaskCompleted = _statusTugas() == 'completed';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Card(
-            color: Colors.green,
+          Card(
+            color: isTaskCompleted ? Colors.green : Colors.blue.shade700,
             child: Padding(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.white, size: 32),
-                  SizedBox(width: 16),
+                  Icon(
+                    isTaskCompleted ? Icons.check_circle : Icons.info_outline,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Text(
-                      'Tugas Telah Selesai',
-                      style: TextStyle(
+                      isTaskCompleted
+                          ? 'Tugas Telah Selesai'
+                          : 'Ringkasan Kunjungan',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -1377,7 +1887,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           ),
           const SizedBox(height: 24),
           const Text(
-            'Ringkasan Pengiriman per Klien',
+            'Detail Pengiriman per Klien',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
@@ -1386,6 +1896,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
             style: TextStyle(fontSize: 13, color: Colors.grey),
           ),
           const SizedBox(height: 12),
+
           ..._kunjunganList.map((k) {
             final items = SyncService.instance.daftarTugasItem.value
                 .where((ti) => ti['kunjungan_id'] == k['id'])
@@ -1397,9 +1908,9 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
 
             return GestureDetector(
               onTap: () {
-                // Menjadikan Summary View clickable untuk melihat detail histori form per-klien
                 setState(() {
                   _activeKunjunganId = k['id'];
+                  _isEditingMode = false;
                   _populateFormsFor(_activeKunjunganId!);
                 });
               },
@@ -1498,17 +2009,19 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Total Tagihan: ${_formatNominal(totalTagihan)}',
+                                'Total Tagihan: ${AppFormatters.currencyIdr(totalTagihan)}',
                               ),
                               Text(
                                 'Metode Bayar: ${metodeBayar?.isNotEmpty == true ? metodeBayar : '-'}',
                               ),
                               if (isCash)
                                 Text(
-                                  'Total Dibayar: ${_formatNominal(totalDibayar)}',
+                                  'Total Dibayar: ${AppFormatters.currencyIdr(totalDibayar)}',
                                 ),
                               if (showKembalian)
-                                Text('Kembalian: ${_formatNominal(kembalian)}'),
+                                Text(
+                                  'Kembalian: ${AppFormatters.currencyIdr(kembalian)}',
+                                ),
                             ],
                           );
                         },
@@ -1537,6 +2050,23 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
               ),
             );
           }),
+
+          if (!isTaskCompleted && semuaSelesai) ...[
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _selesaikanTugasUtama,
+              icon: const Icon(Icons.flag),
+              label: const Text('Selesaikan Tugas'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: Colors.green,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
         ],
       ),
     );

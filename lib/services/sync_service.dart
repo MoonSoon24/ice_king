@@ -39,6 +39,9 @@ class SyncService {
 
   bool isOnline = true;
 
+  int get pendingSyncCount =>
+      (_prefs.getStringList('antrean_sinkron') ?? []).length;
+
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     _loadCache();
@@ -208,24 +211,89 @@ class SyncService {
 
     final listBaru = List<Map<String, dynamic>>.from(notifier.value);
 
+    final dataEnriched = _enrichRelasiLokal(tabel, data);
+
     if (tabel == 'muatan_tugas') {
       _replicateTriggerLokal(aksi, data);
     }
 
     if (aksi == 'insert') {
-      listBaru.insert(0, data);
+      listBaru.insert(0, dataEnriched);
     } else if (aksi == 'update') {
-      final i = listBaru.indexWhere((e) => e['id'] == data['id']);
+      final i = listBaru.indexWhere((e) => e['id'] == dataEnriched['id']);
       if (i != -1) {
-        listBaru[i] = {...listBaru[i], ...data};
+        listBaru[i] = _enrichRelasiLokal(tabel, {
+          ...listBaru[i],
+          ...dataEnriched,
+        });
       }
     } else if (aksi == 'delete') {
-      listBaru.removeWhere((e) => e['id'] == data['id']);
+      listBaru.removeWhere((e) => e['id'] == dataEnriched['id']);
     }
 
     notifier.value = listBaru;
+    if (tabel == 'klien') _refreshNamaKlienDiKunjungan();
+    if (tabel == 'karyawan') _refreshNamaDriverDiTugas();
 
     _prefs.setString('cache_$tabel', jsonEncode(listBaru));
+  }
+
+  Map<String, dynamic> _enrichRelasiLokal(
+    String tabel,
+    Map<String, dynamic> data,
+  ) {
+    if (tabel == 'tugas_kunjungan') {
+      final klienId = data['klien_id'];
+      final klien = daftarKlien.value.firstWhere(
+        (k) => k['id'] == klienId,
+        orElse: () => <String, dynamic>{},
+      );
+      return {
+        ...data,
+        if (klien.isNotEmpty)
+          'nama_klien': klien['nama']?.toString() ?? 'Unknown Klien',
+      };
+    }
+
+    if (tabel == 'tugas') {
+      final karyawanId = data['karyawan_id'];
+      final karyawan = daftarKaryawan.value.firstWhere(
+        (k) => k['id'] == karyawanId,
+        orElse: () => <String, dynamic>{},
+      );
+      return {
+        ...data,
+        if (karyawan.isNotEmpty)
+          'nama_driver': karyawan['nama']?.toString() ?? 'Unknown Driver',
+      };
+    }
+    return data;
+  }
+
+  void _refreshNamaKlienDiKunjungan() {
+    final klienById = {for (final k in daftarKlien.value) k['id']: k};
+    final kunjunganBaru = daftarTugasKunjungan.value.map((k) {
+      final klien = klienById[k['klien_id']];
+      return {
+        ...k,
+        'nama_klien': klien?['nama']?.toString() ?? (k['nama_klien'] ?? '-'),
+      };
+    }).toList();
+    daftarTugasKunjungan.value = kunjunganBaru;
+    _prefs.setString('cache_tugas_kunjungan', jsonEncode(kunjunganBaru));
+  }
+
+  void _refreshNamaDriverDiTugas() {
+    final driverById = {for (final k in daftarKaryawan.value) k['id']: k};
+    final tugasBaru = daftarTugas.value.map((t) {
+      final driver = driverById[t['karyawan_id']];
+      return {
+        ...t,
+        'nama_driver': driver?['nama']?.toString() ?? (t['nama_driver'] ?? '-'),
+      };
+    }).toList();
+    daftarTugas.value = tugasBaru;
+    _prefs.setString('cache_tugas', jsonEncode(tugasBaru));
   }
 
   void _replicateTriggerLokal(String aksi, Map<String, dynamic> data) {
@@ -264,8 +332,8 @@ class SyncService {
         'nama_tugas',
         'modal_awal',
         'status',
-        'tanggal', // MEMASTIKAN FIX SEBELUMNYA TETAP ADA
         'created_at',
+        'waktu_selesai',
       };
     } else if (tabel == 'tugas_kunjungan') {
       allowed = {
@@ -363,8 +431,15 @@ class SyncService {
     }
   }
 
-  Future<void> sinkronkanSemua() async {
-    if (!isOnline || sedangSinkron.value) return;
+  Future<({int total, int sukses, int gagal})> sinkronkanSemua() async {
+    if (!isOnline || sedangSinkron.value) {
+      final antreanSaatIni = _prefs.getStringList('antrean_sinkron') ?? [];
+      return (
+        total: antreanSaatIni.length,
+        sukses: 0,
+        gagal: antreanSaatIni.length,
+      );
+    }
     sedangSinkron.value = true;
 
     final antrean = _prefs.getStringList('antrean_sinkron') ?? [];
@@ -378,16 +453,25 @@ class SyncService {
 
       try {
         if (aksi == 'insert') {
-          await SupabaseConfig.client.from(tabel).insert(data);
-        } else if (aksi == 'update') {
           await SupabaseConfig.client
               .from(tabel)
-              .update(data)
-              .eq('id', data['id']);
+              .upsert(data, onConflict: 'id');
+        } else if (aksi == 'update') {
+          final id = data['id'];
+          if (id == null) continue;
+          final dataUpdate = Map<String, dynamic>.from(data)..remove('id');
+          if (dataUpdate.isEmpty) continue;
+          await SupabaseConfig.client
+              .from(tabel)
+              .update(dataUpdate)
+              .eq('id', id);
         } else if (aksi == 'delete') {
-          await SupabaseConfig.client.from(tabel).delete().eq('id', data['id']);
+          final id = data['id'];
+          if (id == null) continue;
+          await SupabaseConfig.client.from(tabel).delete().eq('id', id);
         }
-      } catch (_) {
+      } catch (e) {
+        debugPrint('Sinkronisasi gagal [$tabel:$aksi]: $e');
         gagal.add(item);
       }
     }
@@ -397,5 +481,10 @@ class SyncService {
       await tarikSemuaDariCloud();
     }
     sedangSinkron.value = false;
+    return (
+      total: antrean.length,
+      sukses: antrean.length - gagal.length,
+      gagal: gagal.length,
+    );
   }
 }
