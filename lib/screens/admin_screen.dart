@@ -17,7 +17,7 @@ class _AdminScreenState extends State<AdminScreen>
   late final TabController _tabController;
   final Set<String> _selectedGudangIds = <String>{};
   final Set<String> _selectedTugasIds = <String>{};
-  final Set<String> _selectedKlienIds = <String>{}; // DITAMBAHKAN
+  final Set<String> _selectedKlienIds = <String>{};
 
   @override
   void initState() {
@@ -31,7 +31,7 @@ class _AdminScreenState extends State<AdminScreen>
         setState(() {
           _selectedGudangIds.clear();
           _selectedTugasIds.clear();
-          _selectedKlienIds.clear(); // DITAMBAHKAN
+          _selectedKlienIds.clear();
         });
       }
     });
@@ -440,6 +440,9 @@ class _AdminScreenState extends State<AdminScreen>
                                           TextField(
                                             controller: ctrlModalAwal,
                                             keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              IdrInputFormatter(),
+                                            ],
                                             decoration: const InputDecoration(
                                               labelText: 'Modal Awal',
                                               prefixIcon: Icon(
@@ -744,7 +747,13 @@ class _AdminScreenState extends State<AdminScreen>
                                                               .trim(),
                                                       'modal_awal':
                                                           double.tryParse(
-                                                            ctrlModalAwal.text,
+                                                            ctrlModalAwal.text
+                                                                .replaceAll(
+                                                                  RegExp(
+                                                                    r'[^0-9]',
+                                                                  ),
+                                                                  '',
+                                                                ),
                                                           ) ??
                                                           0,
                                                       'karyawan_id':
@@ -1392,15 +1401,28 @@ class _AdminScreenState extends State<AdminScreen>
                           rekap?['total_dibayar'] ?? k['total_dibayar'];
                       final parsedDibayar =
                           double.tryParse('${rawTotalDibayar ?? ''}') ?? 0;
-                      final kembalian = rekap?['kembalian'] ?? k['kembalian'];
-                      final showKembalian =
-                          (double.tryParse(kembalian?.toString() ?? '') ?? 0) >
-                          0;
+
                       final isCash =
                           (metodeBayar ?? '').toLowerCase() == 'cash';
                       final totalDibayar = parsedDibayar > 0
                           ? parsedDibayar
                           : (isCash ? totalTagihan : 0);
+
+                      final kembalianDb =
+                          double.tryParse(
+                            '${rekap?['kembalian'] ?? k['kembalian'] ?? 0}',
+                          ) ??
+                          0;
+
+                      final kembalianDihitung =
+                          (isCash && totalDibayar > totalTagihan)
+                          ? (totalDibayar - totalTagihan)
+                          : 0.0;
+
+                      final finalKembalian = kembalianDb > 0
+                          ? kembalianDb
+                          : kembalianDihitung;
+                      final showKembalian = finalKembalian > 0;
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1414,7 +1436,7 @@ class _AdminScreenState extends State<AdminScreen>
                             ),
                           if (showKembalian)
                             Text(
-                              'Kembalian: ${AppFormatters.currencyIdr(kembalian)}',
+                              'Kembalian: ${AppFormatters.currencyIdr(finalKembalian)}',
                             ),
                         ],
                       );
@@ -1844,6 +1866,7 @@ class _AdminScreenState extends State<AdminScreen>
               TextField(
                 controller: ctrlHarga,
                 keyboardType: TextInputType.number,
+                inputFormatters: [IdrInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Harga satuan',
                   prefixIcon: Icon(Icons.attach_money),
@@ -1875,7 +1898,11 @@ class _AdminScreenState extends State<AdminScreen>
                 'kategori': ctrlKategori.text.trim().isEmpty
                     ? null
                     : ctrlKategori.text.trim(),
-                'harga_satuan': double.tryParse(ctrlHarga.text) ?? 0,
+                'harga_satuan':
+                    double.tryParse(
+                      ctrlHarga.text.replaceAll(RegExp(r'[^0-9]'), ''),
+                    ) ??
+                    0,
                 'stok_gudang': int.tryParse(ctrlStok.text) ?? 0,
               });
               if (context.mounted) Navigator.pop(context);
@@ -1895,7 +1922,10 @@ class _AdminScreenState extends State<AdminScreen>
       text: item['kategori']?.toString() ?? '',
     );
     final ctrlHarga = TextEditingController(
-      text: (item['harga_satuan'] ?? 0).toString(),
+      text: (item['harga_satuan'] ?? 0).toString().replaceAll(
+        RegExp(r'\.0$'),
+        '',
+      ),
     );
     final ctrlStok = TextEditingController(
       text: (item['stok_gudang'] ?? 0).toString(),
@@ -1922,6 +1952,7 @@ class _AdminScreenState extends State<AdminScreen>
               TextField(
                 controller: ctrlHarga,
                 keyboardType: TextInputType.number,
+                inputFormatters: [IdrInputFormatter()],
                 decoration: const InputDecoration(labelText: 'Harga satuan'),
               ),
               const SizedBox(height: 12),
@@ -1946,7 +1977,11 @@ class _AdminScreenState extends State<AdminScreen>
                 'kategori': ctrlKategori.text.trim().isEmpty
                     ? null
                     : ctrlKategori.text.trim(),
-                'harga_satuan': double.tryParse(ctrlHarga.text) ?? 0,
+                'harga_satuan':
+                    double.tryParse(
+                      ctrlHarga.text.replaceAll(RegExp(r'[^0-9]'), ''),
+                    ) ??
+                    0,
                 'stok_gudang': int.tryParse(ctrlStok.text) ?? 0,
               });
               if (context.mounted) Navigator.pop(context);
@@ -2020,6 +2055,7 @@ class _AdminScreenState extends State<AdminScreen>
                   TextField(
                     controller: ctrlModalAwal,
                     keyboardType: TextInputType.number,
+                    inputFormatters: [IdrInputFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Modal awal',
                       prefixIcon: Icon(Icons.payments_outlined),
@@ -2341,7 +2377,10 @@ class _AdminScreenState extends State<AdminScreen>
                                   'karyawan_id': selectedKaryawanId,
                                   'modal_awal':
                                       double.tryParse(
-                                        ctrlModalAwal.text.trim(),
+                                        ctrlModalAwal.text.trim().replaceAll(
+                                          RegExp(r'[^0-9]'),
+                                          '',
+                                        ),
                                       ) ??
                                       0,
                                 });
@@ -2509,7 +2548,7 @@ class _AdminScreenState extends State<AdminScreen>
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4.0),
                           child: Text(
-                            'Kategori: ${item['kategori'] ?? '-'}\nStok: ${item['stok_gudang'] ?? 0}  |  Harga: Rp${item['harga_satuan'] ?? 0}',
+                            'Kategori: ${item['kategori'] ?? '-'}\nStok: ${item['stok_gudang'] ?? 0}  |  Harga: ${AppFormatters.currencyIdr(item['harga_satuan'] ?? 0)}',
                             style: const TextStyle(height: 1.4),
                           ),
                         ),

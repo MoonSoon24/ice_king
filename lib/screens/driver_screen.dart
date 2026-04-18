@@ -610,6 +610,11 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     Map<String, dynamic> activeKunjungan,
     List<Map<String, dynamic>> items,
   ) async {
+    final statusBaru =
+        activeKunjungan['status_kunjungan'] ??
+        activeKunjungan['status'] ??
+        'delivered';
+
     if (_metode == null) {
       _showPrettySnackbar(
         'Pilih Metode Pembayaran terlebih dahulu!',
@@ -631,11 +636,10 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     }
 
     // --- OPTIMISTIC UI UPDATE ---
-    // Inject the edited values directly into the local map so the UI
-    // doesn't clear out while waiting for Supabase to sync.
+    activeKunjungan['status'] = statusBaru;
+    activeKunjungan['status_kunjungan'] = statusBaru;
     activeKunjungan['metode_bayar'] = _metode;
     activeKunjungan['total_dibayar'] = _metode == 'cash' ? _getTunaiValue() : 0;
-    // ----------------------------
 
     for (final item in items) {
       final qty = int.tryParse(_qtyCtrls[item['id']]!.text) ?? 0;
@@ -660,6 +664,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
           activeKunjungan['status_kunjungan'] ??
           activeKunjungan['status'] ??
           'delivered',
+      'status_kunjungan': statusBaru,
       'metode_bayar': _metode,
       'total_dibayar': _metode == 'cash' ? _getTunaiValue() : 0,
     }, showSnackbar: false);
@@ -710,6 +715,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
       'id': activeKunjungan['id'],
       'status': 'delivered',
+      'status_kunjungan': 'delivered',
       'catatan': catatan.isEmpty ? null : catatan,
       'metode_bayar': _metode,
       'total_dibayar': _metode == 'cash' ? _getTunaiValue() : 0,
@@ -729,6 +735,7 @@ class _DriverTugasDetailScreenState extends State<DriverTugasDetailScreen> {
     await SyncService.instance.mutateData('tugas_kunjungan', 'update', {
       'id': activeKunjungan['id'],
       'status': 'failed',
+      'status_kunjungan': 'failed',
       'catatan': catatan.trim(),
       'waktu_selesai': DateTime.now().toUtc().toIso8601String(),
     }, showSnackbar: false);

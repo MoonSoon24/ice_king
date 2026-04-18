@@ -42,15 +42,16 @@ class AppFormatters {
 class IdrInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     if (newValue.text.isEmpty) {
       return newValue.copyWith(text: '');
     }
 
-    // Hanya ambil angkanya saja
-    final intValue = int.tryParse(newValue.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    
-    // Format menggunakan fungsi pembagi ribuan
+    final intValue =
+        int.tryParse(newValue.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+
     final String newText = _formatRupiah(intValue);
 
     return TextEditingValue(
