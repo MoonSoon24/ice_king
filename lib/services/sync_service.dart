@@ -17,9 +17,7 @@ class SyncService {
   final ValueNotifier<List<Map<String, dynamic>>> daftarTugas = ValueNotifier(
     [],
   );
-  final ValueNotifier<List<Map<String, dynamic>>> daftarItem = ValueNotifier(
-    [],
-  );
+  // DIHAPUS: daftarItem (item_pesanan)
   final ValueNotifier<List<Map<String, dynamic>>> daftarTugasItem =
       ValueNotifier([]);
   final ValueNotifier<List<Map<String, dynamic>>> daftarTugasKunjungan =
@@ -75,8 +73,7 @@ class SyncService {
     daftarTugasKunjungan.value = _decodeList(
       _prefs.getString('cache_tugas_kunjungan'),
     );
-
-    daftarItem.value = _decodeList(_prefs.getString('cache_item_pesanan'));
+    // DIHAPUS: load cache_item_pesanan
     daftarTugasItem.value = _decodeList(_prefs.getString('cache_tugas_item'));
     daftarMuatanTugas.value = _decodeList(
       _prefs.getString('cache_muatan_tugas'),
@@ -101,34 +98,34 @@ class SyncService {
         SupabaseConfig.client
             .from('tugas_kunjungan')
             .select()
-            .order('created_at', ascending: false),
+            .order('created_at', ascending: false), // Index 0
         SupabaseConfig.client
             .from('tugas')
             .select()
-            .order('created_at', ascending: false),
-        SupabaseConfig.client.from('item_pesanan').select(),
-        SupabaseConfig.client.from('tugas_item').select(),
-        SupabaseConfig.client.from('muatan_tugas').select(),
-        SupabaseConfig.client.from('karyawan').select(),
-        SupabaseConfig.client.from('barang').select(),
-        SupabaseConfig.client.from('klien').select(),
+            .order('created_at', ascending: false), // Index 1
+        // DIHAPUS: item_pesanan
+        SupabaseConfig.client.from('tugas_item').select(), // Index 2
+        SupabaseConfig.client.from('muatan_tugas').select(), // Index 3
+        SupabaseConfig.client.from('karyawan').select(), // Index 4
+        SupabaseConfig.client.from('barang').select(), // Index 5
+        SupabaseConfig.client.from('klien').select(), // Index 6
         SupabaseConfig.client
             .from('audit_log')
             .select()
-            .order('created_at', ascending: false),
-        SupabaseConfig.client.from('tugas_kunjungan_rekap').select(),
+            .order('created_at', ascending: false), // Index 7
+        SupabaseConfig.client.from('tugas_kunjungan_rekap').select(), // Index 8
       ]);
 
       final kunjungan = List<Map<String, dynamic>>.from(hasil[0] as List);
       final tugas = List<Map<String, dynamic>>.from(hasil[1] as List);
-      final itemPesanan = List<Map<String, dynamic>>.from(hasil[2] as List);
-      final tugasItem = List<Map<String, dynamic>>.from(hasil[3] as List);
-      final muatanTugas = List<Map<String, dynamic>>.from(hasil[4] as List);
-      final karyawan = List<Map<String, dynamic>>.from(hasil[5] as List);
-      final barang = List<Map<String, dynamic>>.from(hasil[6] as List);
-      final klien = List<Map<String, dynamic>>.from(hasil[7] as List);
-      final auditLog = List<Map<String, dynamic>>.from(hasil[8] as List);
-      final kunjunganRekap = List<Map<String, dynamic>>.from(hasil[9] as List);
+      // PERBAIKAN INDEX: Shift semua data turun 1 karena item_pesanan dihapus
+      final tugasItem = List<Map<String, dynamic>>.from(hasil[2] as List);
+      final muatanTugas = List<Map<String, dynamic>>.from(hasil[3] as List);
+      final karyawan = List<Map<String, dynamic>>.from(hasil[4] as List);
+      final barang = List<Map<String, dynamic>>.from(hasil[5] as List);
+      final klien = List<Map<String, dynamic>>.from(hasil[6] as List);
+      final auditLog = List<Map<String, dynamic>>.from(hasil[7] as List);
+      final kunjunganRekap = List<Map<String, dynamic>>.from(hasil[8] as List);
 
       final karyawanById = {for (final k in karyawan) k['id']: k};
       final klienById = {for (final k in klien) k['id']: k};
@@ -144,7 +141,7 @@ class SyncService {
         return {...k, 'nama_klien': klienData?['nama'] ?? 'Unknown Klien'};
       }).toList();
 
-      daftarItem.value = itemPesanan;
+      // DIHAPUS: Assign daftarItem
       daftarTugasItem.value = tugasItem;
       daftarMuatanTugas.value = muatanTugas;
       daftarKaryawan.value = karyawan;
@@ -159,10 +156,7 @@ class SyncService {
         jsonEncode(daftarTugasKunjungan.value),
       );
 
-      await _prefs.setString(
-        'cache_item_pesanan',
-        jsonEncode(daftarItem.value),
-      );
+      // DIHAPUS: Simpan cache_item_pesanan
       await _prefs.setString(
         'cache_tugas_item',
         jsonEncode(daftarTugasItem.value),
@@ -196,9 +190,8 @@ class SyncService {
     if (tabel == 'tugas') {
       notifier = daftarTugas;
     } else if (tabel == 'tugas_kunjungan') {
-      notifier = daftarTugasKunjungan; // PERBAIKAN: Sekarang arahnya benar
-    } else if (tabel == 'item_pesanan') {
-      notifier = daftarItem;
+      notifier = daftarTugasKunjungan;
+      // DIHAPUS: Blok item_pesanan
     } else if (tabel == 'tugas_item') {
       notifier = daftarTugasItem;
     } else if (tabel == 'muatan_tugas') {
@@ -247,24 +240,15 @@ class SyncService {
       int stokSekarang = (barang['stok_gudang'] as num?)?.toInt() ?? 0;
 
       if (aksi == 'insert') {
-        // Kurangi stok barang saat load ditambahkan offline
         int qtyBawa = (data['qty_bawa'] as num?)?.toInt() ?? 0;
         barang['stok_gudang'] = stokSekarang - qtyBawa;
       } else if (aksi == 'update') {
-        // Logika update agak rumit jika kita tidak menyimpan OLD data di Flutter,
-        // namun biasanya offline insert adalah kasus utama yang butuh penanganan instan.
-        // Jika perlu, Anda bisa mengurangi sisa barang dari stok saat driver update qty_sisa
         int qtySisa = (data['qty_sisa'] as num?)?.toInt() ?? 0;
-        // Contoh sederhana: jika driver memasukkan sisa barang, kita asumsikan stok bertambah
-        // (Catatan: ini butuh penyesuaian tergantung alur UI Anda apakah mengirim selisih atau total)
       }
 
       listBarang[i] = barang;
-      daftarBarang.value = listBarang; // Update UI seketika
-      _prefs.setString(
-        'cache_barang',
-        jsonEncode(listBarang),
-      ); // Simpan perubahan stok ke cache
+      daftarBarang.value = listBarang;
+      _prefs.setString('cache_barang', jsonEncode(listBarang));
     }
   }
 
@@ -280,6 +264,7 @@ class SyncService {
         'nama_tugas',
         'modal_awal',
         'status',
+        'tanggal', // MEMASTIKAN FIX SEBELUMNYA TETAP ADA
         'created_at',
       };
     } else if (tabel == 'tugas_kunjungan') {
@@ -295,14 +280,7 @@ class SyncService {
         'urutan',
         'waktu_selesai',
       };
-    } else if (tabel == 'item_pesanan') {
-      allowed = {
-        'id',
-        'id_tugas',
-        'nama_barang',
-        'qty_pesanan',
-        'qty_drop_real',
-      };
+      // DIHAPUS: Blok item_pesanan
     } else if (tabel == 'tugas_item') {
       allowed = {
         'id',
@@ -385,7 +363,6 @@ class SyncService {
     }
   }
 
-  // FIXED: Moved this outside mutateData
   Future<void> sinkronkanSemua() async {
     if (!isOnline || sedangSinkron.value) return;
     sedangSinkron.value = true;
