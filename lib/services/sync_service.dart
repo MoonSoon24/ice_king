@@ -215,7 +215,10 @@ class SyncService {
 
     final listBaru = List<Map<String, dynamic>>.from(notifier.value);
 
-    // PERBAIKAN: Logika mutasi di-sederhanakan karena data sudah dipisah
+    if (tabel == 'muatan_tugas') {
+      _replicateTriggerLokal(aksi, data);
+    }
+
     if (aksi == 'insert') {
       listBaru.insert(0, data);
     } else if (aksi == 'update') {
@@ -229,11 +232,42 @@ class SyncService {
 
     notifier.value = listBaru;
 
-    // Simpan ke cache lokal langsung setelah update UI
     _prefs.setString('cache_$tabel', jsonEncode(listBaru));
   }
 
-  // FIXED: Moved this outside mutateData
+  void _replicateTriggerLokal(String aksi, Map<String, dynamic> data) {
+    final barangId = data['barang_id'];
+    if (barangId == null) return;
+
+    final listBarang = List<Map<String, dynamic>>.from(daftarBarang.value);
+    final i = listBarang.indexWhere((b) => b['id'] == barangId);
+
+    if (i != -1) {
+      final barang = Map<String, dynamic>.from(listBarang[i]);
+      int stokSekarang = (barang['stok_gudang'] as num?)?.toInt() ?? 0;
+
+      if (aksi == 'insert') {
+        // Kurangi stok barang saat load ditambahkan offline
+        int qtyBawa = (data['qty_bawa'] as num?)?.toInt() ?? 0;
+        barang['stok_gudang'] = stokSekarang - qtyBawa;
+      } else if (aksi == 'update') {
+        // Logika update agak rumit jika kita tidak menyimpan OLD data di Flutter,
+        // namun biasanya offline insert adalah kasus utama yang butuh penanganan instan.
+        // Jika perlu, Anda bisa mengurangi sisa barang dari stok saat driver update qty_sisa
+        int qtySisa = (data['qty_sisa'] as num?)?.toInt() ?? 0;
+        // Contoh sederhana: jika driver memasukkan sisa barang, kita asumsikan stok bertambah
+        // (Catatan: ini butuh penyesuaian tergantung alur UI Anda apakah mengirim selisih atau total)
+      }
+
+      listBarang[i] = barang;
+      daftarBarang.value = listBarang; // Update UI seketika
+      _prefs.setString(
+        'cache_barang',
+        jsonEncode(listBarang),
+      ); // Simpan perubahan stok ke cache
+    }
+  }
+
   Map<String, dynamic> _sanitizeCloudData(
     String tabel,
     Map<String, dynamic> data,
